@@ -1,16 +1,16 @@
 {
-  "name": "dsh-config-generations",
+  "name": "dsh-timemachine",
   "description": "Version control for a DeepSeek Harness profile's plugin-tree configuration",
   "version": "0.1.0",
   "repository": {
     "type": "git",
-    "url": "git+https://github.com/vimalinx/dsh-config-generations.git"
+    "url": "git+https://github.com/vimalinx/dsh-timemachine.git"
   },
   "type": "module",
   "main": "lib/index.js",
   "types": "lib/types/index.d.ts",
   "bin": {
-    "dsh-config-generations": "lib/cli.js"
+    "dsh-timemachine": "lib/cli.js"
   },
   "exports": {
     ".": {

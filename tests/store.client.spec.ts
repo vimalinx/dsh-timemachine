@@ -7,7 +7,7 @@
 import { describe, expect, it } from 'vitest'
 import type { GenerationSummary } from '../src/rpc.ts'
 import type { ConfigGeneration } from '../src/types.ts'
-import { createConfigGenerationsStore } from '../src/client/store.ts'
+import { createTimeMachineStore } from '../src/client/store.ts'
 import { formatTimestamp, restoreTargets, shortGenerationId, summaryStatusKey } from '../src/client/views.ts'
 
 function summary(overrides: Partial<GenerationSummary> = {}): GenerationSummary {
@@ -43,9 +43,9 @@ function generation(overrides: Partial<ConfigGeneration> = {}): ConfigGeneration
   }
 }
 
-describe('createConfigGenerationsStore', () => {
+describe('createTimeMachineStore', () => {
   it('starts idle and only the first read shows loading', () => {
-    const store = createConfigGenerationsStore().create()
+    const store = createTimeMachineStore().create()
     expect(store.getSnapshot().list).toBe('idle')
     store.actions.listBegin()
     expect(store.getSnapshot().list).toBe('loading')
@@ -56,7 +56,7 @@ describe('createConfigGenerationsStore', () => {
   })
 
   it('listLoaded publishes rows and unreadable records and clears a previous error', () => {
-    const store = createConfigGenerationsStore().create()
+    const store = createTimeMachineStore().create()
     store.actions.listFailed('boom')
     store.actions.listLoaded([summary()], [{ path: '/records/xyz.json', reason: 'bad format' }])
     const state = store.getSnapshot()
@@ -67,7 +67,7 @@ describe('createConfigGenerationsStore', () => {
   })
 
   it('listAbsent clears rows without an error', () => {
-    const store = createConfigGenerationsStore().create()
+    const store = createTimeMachineStore().create()
     store.actions.listLoaded([summary()], [{ path: '/records/xyz.json', reason: 'bad format' }])
     store.actions.listAbsent()
     const state = store.getSnapshot()
@@ -78,7 +78,7 @@ describe('createConfigGenerationsStore', () => {
   })
 
   it('listFailed keeps the previously shown rows and records the message', () => {
-    const store = createConfigGenerationsStore().create()
+    const store = createTimeMachineStore().create()
     store.actions.listLoaded([summary()], [])
     store.actions.listFailed('connection refused')
     const state = store.getSnapshot()
@@ -88,7 +88,7 @@ describe('createConfigGenerationsStore', () => {
   })
 
   it('select opens a loading detail and retracts a pending restore of the previous row', () => {
-    const store = createConfigGenerationsStore().create()
+    const store = createTimeMachineStore().create()
     store.actions.select('aaa')
     expect(store.getSnapshot().detail).toEqual({ status: 'loading', id: 'aaa' })
     store.actions.detailLoaded(generation())
@@ -102,7 +102,7 @@ describe('createConfigGenerationsStore', () => {
   })
 
   it('closeDetail collapses the detail and any pending restore', () => {
-    const store = createConfigGenerationsStore().create()
+    const store = createTimeMachineStore().create()
     store.actions.select('aaa')
     store.actions.detailLoaded(generation())
     store.actions.confirmRestore('abcdef0123456789')
@@ -114,18 +114,18 @@ describe('createConfigGenerationsStore', () => {
   })
 
   it('detailFailed records the message against the queried id', () => {
-    const store = createConfigGenerationsStore().create()
+    const store = createTimeMachineStore().create()
     store.actions.select('aaa')
-    store.actions.detailFailed('aaa', 'config-generation-not-found: nope')
+    store.actions.detailFailed('aaa', 'timemachine-not-found: nope')
     expect(store.getSnapshot().detail).toEqual({
       status: 'failed',
       id: 'aaa',
-      message: 'config-generation-not-found: nope',
+      message: 'timemachine-not-found: nope',
     })
   })
 
   it('the restore machine: confirm → working → done clears the confirmation', () => {
-    const store = createConfigGenerationsStore().create()
+    const store = createTimeMachineStore().create()
     store.actions.select('aaa')
     store.actions.detailLoaded(generation())
     store.actions.confirmRestore('abcdef0123456789')
@@ -142,17 +142,17 @@ describe('createConfigGenerationsStore', () => {
   })
 
   it('restoreFailed clears the confirmation and keeps the message', () => {
-    const store = createConfigGenerationsStore().create()
+    const store = createTimeMachineStore().create()
     store.actions.confirmRestore('aaa')
     store.actions.restoreWorking('aaa')
-    store.actions.restoreFailed('aaa', 'config-generation-not-found: nope')
+    store.actions.restoreFailed('aaa', 'timemachine-not-found: nope')
     const state = store.getSnapshot()
     expect(state.confirmId).toBeUndefined()
-    expect(state.restore).toEqual({ status: 'failed', id: 'aaa', message: 'config-generation-not-found: nope' })
+    expect(state.restore).toEqual({ status: 'failed', id: 'aaa', message: 'timemachine-not-found: nope' })
   })
 
   it('cancelRestore closes the confirmation without touching the detail', () => {
-    const store = createConfigGenerationsStore().create()
+    const store = createTimeMachineStore().create()
     store.actions.select('aaa')
     store.actions.confirmRestore('aaa')
     store.actions.cancelRestore()
@@ -162,7 +162,7 @@ describe('createConfigGenerationsStore', () => {
   })
 
   it('reset returns every field to the initial snapshot', () => {
-    const store = createConfigGenerationsStore().create()
+    const store = createTimeMachineStore().create()
     store.actions.listLoaded([summary()], [{ path: '/x', reason: 'bad' }])
     store.actions.select('aaa')
     store.actions.detailLoaded(generation())

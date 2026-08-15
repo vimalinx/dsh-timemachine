@@ -13,16 +13,16 @@ import type { InjectFace, PropsLocale, PropsRuntime, PropsStore } from '@deepsee
 import type {} from '@deepseek-ai/dsh-client-ui-sidebar/client'
 import type { GenerationSummary } from '../rpc.ts'
 import type { BundleDrift, ConfigGeneration } from '../types.ts'
-import type { ConfigGenerationsStore, DetailState, RestoreState } from './store.ts'
+import type { TimeMachineStore, DetailState, RestoreState } from './store.ts'
 import { formatTimestamp, restoreTargets, shortGenerationId, summaryStatusKey } from './views.ts'
-import css from './ConfigGenerationsPanel.module.css'
+import css from './TimeMachinePanel.module.css'
 
 /**
  * The panel's injected face: read triggers and the restore flow. Callbacks
  * write results through the store's baked actions; the component never sees
  * the RPC layer.
  */
-export interface ConfigGenerationsPanelFace {
+export interface TimeMachinePanelFace {
   /** Re-read the roster unless a read is already in flight. */
   onRefresh: () => void
   /** Expand a row and read its full record. */
@@ -40,13 +40,13 @@ export interface ConfigGenerationsPanelFace {
 }
 
 /** Full panel props composed by the sidebar footer-action slot. */
-export type ConfigGenerationsPanelProps =
+export type TimeMachinePanelProps =
   PropsRuntime<'sidebar.footer.action'>
-  & PropsStore<ConfigGenerationsStore>
-  & InjectFace<ConfigGenerationsPanelFace>
-  & PropsLocale<'configGenerations'>
+  & PropsStore<TimeMachineStore>
+  & InjectFace<TimeMachinePanelFace>
+  & PropsLocale<'timemachine'>
 
-type Translate = ConfigGenerationsPanelProps['t']
+type Translate = TimeMachinePanelProps['t']
 
 /** One bundle's drift line: missing sides read as added/removed, a null version as unversioned. */
 function driftLine(drift: BundleDrift, t: Translate): string {
@@ -140,7 +140,7 @@ function RestoreOutcome({ restore, onDismiss, t }: {
 }
 
 /** Render the footer trigger and, while open, the roster panel above it. */
-export function ConfigGenerationsPanel({
+export function TimeMachinePanel({
   wide,
   useStore,
   onRefresh,
@@ -151,7 +151,7 @@ export function ConfigGenerationsPanel({
   onRestore,
   onDismissRestoreResult,
   t,
-}: ConfigGenerationsPanelProps) {
+}: TimeMachinePanelProps) {
   const state = useStore(snapshot => snapshot)
   const [open, setOpen] = useState(false)
 

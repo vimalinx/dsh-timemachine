@@ -1,5 +1,5 @@
 # The bundle layer `dsh plugin add` applies when a profile lists this package:
 # mount the configuration-history plugin (service + loopback RPC channel).
 - insert:
-    - id: config-generations
-      name: dsh-config-generations
+    - id: timemachine
+      name: dsh-timemachine

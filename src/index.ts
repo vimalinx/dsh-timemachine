@@ -1,23 +1,23 @@
 /**
- * `dsh-config-generations` — external bundle mounting the configuration
- * history into a booted profile tree: the `configGenerations` service, a
- * loopback-pinned `/configGenerations` Connection RPC channel (the browser
- * panel's wire, replacing the core ApiProxy `configGenerations` domain), and
+ * `dsh-timemachine` — external bundle mounting the configuration
+ * history into a booted profile tree: the `timemachine` service, a
+ * loopback-pinned `/timemachine` Connection RPC channel (the browser
+ * panel's wire, replacing the core ApiProxy `timemachine` domain), and
  * a best-effort record of the boot it is part of.
  *
  * Function plugin: named `apply`/`inject`/`name` only — a default export
  * would make the Loader discard the namespace.
- * @module dsh-config-generations
+ * @module dsh-timemachine
  */
 
 import type { Context } from '@deepseek-ai/cordis'
 import type { ConnectionRpcHandler } from '@deepseek-ai/dsh-client-connection'
-import ConfigGenerations from './service.ts'
+import TimeMachine from './service.ts'
 import { lastActivated, latestStatus } from './generations.ts'
 import {
-  CONFIG_GENERATIONS_CHANNEL,
-  type ConfigGenerationsErrorCode,
-  type ConfigGenerationsRpcResult,
+  TIMEMACHINE_CHANNEL,
+  type TimeMachineErrorCode,
+  type TimeMachineRpcResult,
   type GenerationSummary,
 } from './rpc.ts'
 import { idRequestSchema, listRequestSchema } from './rpc-schemas.ts'
@@ -26,10 +26,10 @@ import type { ConfigGeneration } from './types.ts'
 export type * from './types.ts'
 export * from './generations.ts'
 export * from './rpc.ts'
-export { ConfigGenerations }
+export { TimeMachine }
 
 /** Cordis plugin name. */
-export const name = 'config-generations'
+export const name = 'timemachine'
 
 /** Required services: the Connection host half carrying the RPC channel registry. */
 export const inject = ['connection']
@@ -40,8 +40,8 @@ export const inject = ['connection']
  * codes, and the carrier passes the result slot through verbatim.
  */
 function rpcError(
-  code: ConfigGenerationsErrorCode, message: string, details: Record<string, unknown>,
-): ConfigGenerationsRpcResult<never> {
+  code: TimeMachineErrorCode, message: string, details: Record<string, unknown>,
+): TimeMachineRpcResult<never> {
   return { ok: false, error: { code, message, details } }
 }
 
@@ -49,9 +49,9 @@ function rpcError(
  * Unavailable report shared by every endpoint: the tree was not booted from a
  * dsh profile, so there is no profile directory to read or restore against.
  */
-function absent(): ConfigGenerationsRpcResult<never> {
+function absent(): TimeMachineRpcResult<never> {
   return rpcError(
-    'config-generation-absent',
+    'timemachine-absent',
     'configuration history is unavailable: this tree was not booted from a dsh profile',
     {},
   )
@@ -80,13 +80,13 @@ function generationSummary(
  * and ambiguous-prefix messages are its documented text (`selectGeneration`),
  * anything else is an internal fault.
  */
-function readError(id: string, error: unknown): ConfigGenerationsRpcResult<never> {
+function readError(id: string, error: unknown): TimeMachineRpcResult<never> {
   const message = error instanceof Error ? error.message : String(error)
   if (message.startsWith('no recorded configuration ')) {
-    return rpcError('config-generation-not-found', message, { id })
+    return rpcError('timemachine-not-found', message, { id })
   }
   if (/ matches \d+ configurations: /.test(message)) {
-    return rpcError('config-generation-ambiguous', message, { id })
+    return rpcError('timemachine-ambiguous', message, { id })
   }
   return rpcError('internal', message, {})
 }
@@ -101,7 +101,7 @@ type ChannelHandler = (
   endpoint: string,
   payload: unknown,
   signal: AbortSignal,
-) => Promise<ConfigGenerationsRpcResult<unknown>>
+) => Promise<TimeMachineRpcResult<unknown>>
 
 /**
  * The channel handler: validate the payload at the wire boundary, dispatch to
@@ -113,8 +113,8 @@ type ChannelHandler = (
  * @returns the Connection channel handler.
  */
 function createHandler(ctx: Context): ChannelHandler {
-  const service = (): ConfigGenerations | undefined => {
-    const mounted = ctx.get('configGenerations')
+  const service = (): TimeMachine | undefined => {
+    const mounted = ctx.get('timemachine')
     return mounted !== undefined && mounted.available ? mounted : undefined
   }
   return async (endpoint, payload) => {
@@ -177,20 +177,20 @@ function createHandler(ctx: Context): ChannelHandler {
  * @param ctx - plugin context carrying the Connection host service.
  */
 export function apply(ctx: Context): void {
-  ctx.plugin(ConfigGenerations)
+  ctx.plugin(TimeMachine)
   // The handler answers in this package's own result union; structurally it
   // is the carrier's RpcResult, and the carrier forwards the slot verbatim.
   ctx.connection.rpc.handle(
-    CONFIG_GENERATIONS_CHANNEL,
+    TIMEMACHINE_CHANNEL,
     createHandler(ctx) as unknown as ConnectionRpcHandler,
     { authority: 'loopback' },
   )
   // The service fiber loads asynchronously (fibers never start inside the
   // `ctx.plugin()` call), so the boot record waits on the service name rather
   // than reading the slot synchronously.
-  ctx.inject(['configGenerations'], (inner) => {
-    void inner.configGenerations.recordBoot(new Date().toISOString()).catch((error: unknown) => {
-      process.stderr.write(`dsh-config-generations: warning: could not record this configuration: ${String(error)}\n`)
+  ctx.inject(['timemachine'], (inner) => {
+    void inner.timemachine.recordBoot(new Date().toISOString()).catch((error: unknown) => {
+      process.stderr.write(`dsh-timemachine: warning: could not record this configuration: ${String(error)}\n`)
     })
   })
 }

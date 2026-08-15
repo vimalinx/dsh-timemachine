@@ -1,7 +1,7 @@
 /** Configuration-generation panel dictionaries. */
 
 /** Dictionary namespace owned by this plugin. */
-export const NS = 'configGenerations'
+export const NS = 'timemachine'
 
 /** Simplified Chinese dictionary (the key-set source of truth). */
 export const zh = {
@@ -45,12 +45,12 @@ export const zh = {
 } satisfies Record<string, string>
 
 /** Translation keys owned by the configuration-generation namespace. */
-export type ConfigGenerationsKey = keyof typeof zh
+export type TimeMachineKey = keyof typeof zh
 
 declare module '@deepseek-ai/dsh-client-ui-slots' {
   interface LocaleNamespaceMap {
     /** Configuration-generation panel copy. */
-    configGenerations: ConfigGenerationsKey
+    timemachine: TimeMachineKey
   }
 }
 
@@ -93,4 +93,4 @@ export const en = {
   'restore.driftLine': '{name}: {recorded} → {current}',
   'restore.driftAdded': '(added)',
   'restore.driftRemoved': '(removed)',
-} satisfies Record<ConfigGenerationsKey, string>
+} satisfies Record<TimeMachineKey, string>

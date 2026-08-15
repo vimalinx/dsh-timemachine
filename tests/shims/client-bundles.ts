@@ -14,7 +14,7 @@
  * bundle sniffs `window` to decide its initial locale (a bare `window` global
  * in a node process would make a test machine's language decide it), and no
  * captured export is meant to see a browser.
- * @module dsh-config-generations/tests/shims/client-bundles
+ * @module dsh-timemachine/tests/shims/client-bundles
  */
 
 import { createRequire } from 'node:module'

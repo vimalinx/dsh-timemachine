@@ -1,8 +1,8 @@
 /**
- * `ctx.configGenerations` over derived or explicit host facts: what it serves
+ * `ctx.timemachine` over derived or explicit host facts: what it serves
  * without a profile, what it records with one, and the guarantee that a
  * refused restore leaves the profile untouched.
- * @module dsh-config-generations/tests/service
+ * @module dsh-timemachine/tests/service
  */
 
 import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
@@ -10,7 +10,7 @@ import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { afterEach, beforeEach, describe, expect, it } from 'vitest'
 import { Context } from '@deepseek-ai/cordis'
-import ConfigGenerations from '../src/service.ts'
+import TimeMachine from '../src/service.ts'
 import {
   digestText,
   recordGeneration,
@@ -71,10 +71,10 @@ function host(overrides: Partial<ConfigGenerationHost> = {}): ConfigGenerationHo
 }
 
 /** Mount the service, with explicit host facts or none (a profile-less tree). */
-function serve(handoff?: ConfigGenerationHost): ConfigGenerations {
+function serve(handoff?: ConfigGenerationHost): TimeMachine {
   return handoff === undefined
-    ? new ConfigGenerations(new Context())
-    : new ConfigGenerations(new Context(), handoff)
+    ? new TimeMachine(new Context())
+    : new TimeMachine(new Context(), handoff)
 }
 
 describe('without a booted profile', () => {
@@ -153,7 +153,7 @@ describe('reading one generation', () => {
     const generation = await service.record(environment(), '2026-08-14T00:00:00.000Z')
     expect(service.lastGood()).toBeUndefined()
     writeFileSync(
-      join(profileDir, 'config-generations', `${generation!.id}.json`),
+      join(profileDir, 'timemachine', `${generation!.id}.json`),
       JSON.stringify({
         ...generation,
         outcomes: [{ at: '2026-08-14T00:00:01.000Z', status: 'activated', overlays: [] }],
@@ -189,7 +189,7 @@ describe('restoring from inside the tree', () => {
     // A stored digest the current installation cannot produce stands in for a
     // bundle that moved under the same manifest.
     writeFileSync(
-      join(profileDir, 'config-generations', `${generation!.id}.json`),
+      join(profileDir, 'timemachine', `${generation!.id}.json`),
       JSON.stringify({ ...generation, composed: { ...generation!.composed, digest: '0'.repeat(64) } }, undefined, 2),
     )
     const edited = '- id: my-own-edit\n  disabled: true\n'
@@ -206,7 +206,7 @@ describe('restoring from inside the tree', () => {
     const service = serve(host())
     const generation = await service.record(environment(), '2026-08-14T00:00:00.000Z')
     writeFileSync(
-      join(profileDir, 'config-generations', `${generation!.id}.json`),
+      join(profileDir, 'timemachine', `${generation!.id}.json`),
       JSON.stringify({
         ...generation,
         bundles: [{ name: '@deepseek-ai/dsh-base', version: '0.0.1-recorded' }],

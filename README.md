@@ -1,4 +1,4 @@
-# dsh-config-generations
+# dsh-timemachine
 
 English | [中文](README.zh.md)
 
@@ -11,14 +11,14 @@ This package is a standard external dsh plugin: it installs with `dsh plugin add
 Once the package is published to npm:
 
 ```sh
-dsh plugin --profile web add dsh-config-generations
+dsh plugin --profile web add dsh-timemachine
 ```
 
 Before publication, install from a tarball or a git URL — the same command accepts both:
 
 ```sh
-dsh plugin --profile web add ./dsh-config-generations-0.1.0.tgz
-dsh plugin --profile web add git+https://github.com/Electricitysheep/dsh-config-generations.git
+dsh plugin --profile web add ./dsh-timemachine-0.1.0.tgz
+dsh plugin --profile web add git+https://github.com/vimalinx/dsh-timemachine.git
 ```
 
 Boot the `web` profile once after installing; the first generation is recorded at that boot.
@@ -38,14 +38,14 @@ With the plugin installed, the `web` profile's sidebar footer gains a **Config g
 
 ## Standalone CLI
 
-The package ships a `dsh-config-generations` binary for shells outside a booted tree:
+The package ships a `dsh-timemachine` binary for shells outside a booted tree:
 
 ```sh
-dsh-config-generations log --profile web       # list recorded configurations, oldest first
-dsh-config-generations show --profile web <id> # print one configuration's composition
-dsh-config-generations diff --profile web <id> [id]
+dsh-timemachine log --profile web       # list recorded configurations, oldest first
+dsh-timemachine show --profile web <id> # print one configuration's composition
+dsh-timemachine diff --profile web <id> [id]
                                                # compare two compositions (default: against the latest)
-dsh-config-generations restore --profile web <id>
+dsh-timemachine restore --profile web <id>
                                                # write one configuration's input files back
 ```
 
@@ -61,7 +61,7 @@ A generation records the three **durable inputs** that decide a profile's plugin
 2. the profile patch layer — `<profile>/cordis.patch.yml`;
 3. the home patch layer — `$DSH_HOME/cordis.patch.yml`, applied over every profile.
 
-Each record lives at `<profile>/config-generations/<id>.json`, where `<id>` is the first 12 hex characters of a digest over the three input texts. Alongside the inputs, a record carries the rendered composition those inputs produced, the resolved version of every bundle layer, and every boot outcome against the configuration.
+Each record lives at `<profile>/timemachine/<id>.json`, where `<id>` is the first 12 hex characters of a digest over the three input texts. Alongside the inputs, a record carries the rendered composition those inputs produced, the resolved version of every bundle layer, and every boot outcome against the configuration.
 
 **Changes are recorded, not launches.** Booting an unchanged configuration appends a new outcome to the existing record instead of creating a second one. `recordedAt` marks when the configuration was first seen and never moves; `lastSeenAt` orders the history.
 
@@ -80,7 +80,7 @@ The history keeps the newest 50 generations plus the newest one that ever activa
 ## Limitations
 
 - **A restore takes effect at the next boot**, never in the running process.
-- **Mutually exclusive with a dsh fork that has this feature patched into core.** Both mount the same `configGenerations` service and RPC surface; install this plugin only against a stock dsh installation.
+- **Mutually exclusive with a dsh fork that has this feature patched into core.** Both mount the same `timemachine` service and RPC surface; install this plugin only against a stock dsh installation.
 - **Loopback boundary.** The web panel talks to the service over a Connection RPC channel registered with `authority: 'loopback'` — it answers only same-host clients and is not reachable from remote connections.
 - **Runtime patch reloads do not add a generation.** An edit made while `dsh` runs is recorded only at the next boot.
 - **Per-invocation inputs are not restorable.** `--patch` overlays and environment switches are recorded on an outcome for orientation but never written back, because they do not persist.

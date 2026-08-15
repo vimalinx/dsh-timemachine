@@ -1,7 +1,7 @@
 /**
  * Wire contract of the configuration-history RPC channel: one dedicated
- * Connection channel (`/configGenerations`) replacing the core ApiProxy
- * `configGenerations` domain, with `list` / `read` / `restore` endpoints.
+ * Connection channel (`/timemachine`) replacing the core ApiProxy
+ * `timemachine` domain, with `list` / `read` / `restore` endpoints.
  *
  * The durable record types cross the wire unchanged — they are plain JSON and
  * this package's own format — while the roster reads a slim summary that drops
@@ -11,7 +11,7 @@
  * bundle inlines it, and the host half validates payloads against the zod
  * mirror in `./rpc-schemas.ts` (kept host-only so the bundle never inlines
  * zod).
- * @module dsh-config-generations/rpc
+ * @module dsh-timemachine/rpc
  */
 
 import type {
@@ -23,13 +23,13 @@ import type {
 } from './types.ts'
 
 /** The logical Connection channel this plugin registers and calls. */
-export const CONFIG_GENERATIONS_CHANNEL = '/configGenerations'
+export const TIMEMACHINE_CHANNEL = '/timemachine'
 
 /** Channel endpoints, named as channel-relative paths. */
-export const CONFIG_GENERATIONS_ENDPOINTS = ['list', 'read', 'restore'] as const
+export const TIMEMACHINE_ENDPOINTS = ['list', 'read', 'restore'] as const
 
 /** One channel endpoint. */
-export type ConfigGenerationsEndpoint = (typeof CONFIG_GENERATIONS_ENDPOINTS)[number]
+export type TimeMachineEndpoint = (typeof TIMEMACHINE_ENDPOINTS)[number]
 
 /**
  * List-row view of one recorded configuration. Carries everything a roster
@@ -56,44 +56,44 @@ export interface GenerationSummary {
 }
 
 /** `list` request payload (empty; the channel is pinned to the booted profile). */
-export interface ConfigGenerationsListRequest {}
+export interface TimeMachineListRequest {}
 
 /**
  * `list` response: every recorded configuration of the booted profile, oldest
  * `lastSeenAt` first, as slim summaries, plus the records the reader rejected
  * so the surface can flag corruption. A missing profile derivation answers
- * `config-generation-absent` instead.
+ * `timemachine-absent` instead.
  */
-export interface ConfigGenerationsListResponse {
+export interface TimeMachineListResponse {
   generations: GenerationSummary[]
   unreadable: UnreadableGeneration[]
 }
 
 /** `read`/`restore` request payload: a generation id or unambiguous prefix. */
-export interface ConfigGenerationsIdRequest {
+export interface TimeMachineIdRequest {
   id: string
 }
 
 /** `read` response: the complete record, rendered composition included. */
-export type ConfigGenerationsReadResponse = ConfigGeneration
+export type TimeMachineReadResponse = ConfigGeneration
 
 /**
  * `restore` response: what the restore did. A refusal (`restored: false` with
  * `refusal`/`verdict`) is a normal business result, not an RPC error; only an
- * unresolvable id answers with `config-generation-not-found` /
- * `config-generation-ambiguous`.
+ * unresolvable id answers with `timemachine-not-found` /
+ * `timemachine-ambiguous`.
  */
-export type ConfigGenerationsRestoreResponse = RestoreResult
+export type TimeMachineRestoreResponse = RestoreResult
 
 /**
  * The channel's error vocabulary, mirroring the core ApiProxy domain's codes
  * plus the shared `bad-request`/`internal` fallbacks.
  */
-export type ConfigGenerationsErrorCode =
+export type TimeMachineErrorCode =
   | 'bad-request'
-  | 'config-generation-absent'
-  | 'config-generation-not-found'
-  | 'config-generation-ambiguous'
+  | 'timemachine-absent'
+  | 'timemachine-not-found'
+  | 'timemachine-ambiguous'
   | 'internal'
 
 /**
@@ -101,8 +101,8 @@ export type ConfigGenerationsErrorCode =
  * carrier's `RpcError` narrowed to this channel's codes. Self-owned so
  * neither half imports the ApiProxy contract across the plugin boundary.
  */
-export interface ConfigGenerationsRpcError {
-  code: ConfigGenerationsErrorCode
+export interface TimeMachineRpcError {
+  code: TimeMachineErrorCode
   message: string
   details: Record<string, unknown>
 }
@@ -112,6 +112,6 @@ export interface ConfigGenerationsRpcError {
  * `RpcResult<T>`: the host handler returns the carrier's type and the client
  * narrows the answer to this shape.
  */
-export type ConfigGenerationsRpcResult<T> =
+export type TimeMachineRpcResult<T> =
   | { ok: true; value: T }
-  | { ok: false; error: ConfigGenerationsRpcError }
+  | { ok: false; error: TimeMachineRpcError }

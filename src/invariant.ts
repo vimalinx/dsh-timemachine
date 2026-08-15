@@ -1,16 +1,16 @@
 /**
- * Package-owned invariant companion for `dsh-config-generations`.
- * @module dsh-config-generations/invariant
+ * Package-owned invariant companion for `dsh-timemachine`.
+ * @module dsh-timemachine/invariant
  */
 
 /* jscpd:ignore-start */
 import type { Context } from '@deepseek-ai/cordis'
 import type { InvariantInstaller } from '@deepseek-ai/dsh-invariants'
 
-const PACKAGE_NAME = 'dsh-config-generations'
+const PACKAGE_NAME = 'dsh-timemachine'
 
 /** Cordis companion plugin name. */
-export const name = 'config-generations-invariant'
+export const name = 'timemachine-invariant'
 /** Service required before the companion can reserve package ownership. */
 export const inject = ['invariants']
 

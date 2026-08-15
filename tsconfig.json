@@ -21,8 +21,8 @@
     "noUnusedParameters": true,
     "types": ["node"],
     "paths": {
-      "dsh-config-generations": ["./src/index.ts"],
-      "dsh-config-generations/invariant": ["./src/invariant.ts"]
+      "dsh-timemachine": ["./src/index.ts"],
+      "dsh-timemachine/invariant": ["./src/invariant.ts"]
     }
   },
   "include": [

@@ -1,6 +1,6 @@
 /**
  * Configuration-generation panel plugin, browser half: one
- * `sidebar.footer.action` entry over the host's `/configGenerations`
+ * `sidebar.footer.action` entry over the host's `/timemachine`
  * Connection RPC channel (list / read / restore). There is no event push for
  * the history, so the roster is re-read on open and after every operation; a
  * reconnect drops in-flight reads and starts over (the new host may hold a
@@ -16,27 +16,27 @@ import type {} from '@deepseek-ai/dsh-client-ui-sidebar/client'
 import type { ClientContext } from '@deepseek-ai/dsh-client-runtime/client'
 import type { BoundActions } from '@deepseek-ai/dsh-client-ui-slots'
 import {
-  CONFIG_GENERATIONS_CHANNEL,
-  type ConfigGenerationsListResponse,
-  type ConfigGenerationsReadResponse,
-  type ConfigGenerationsRestoreResponse,
-  type ConfigGenerationsRpcResult,
+  TIMEMACHINE_CHANNEL,
+  type TimeMachineListResponse,
+  type TimeMachineReadResponse,
+  type TimeMachineRestoreResponse,
+  type TimeMachineRpcResult,
 } from '../rpc.ts'
-import { ConfigGenerationsPanel } from './ConfigGenerationsPanel.tsx'
-import type { ConfigGenerationsPanelFace } from './ConfigGenerationsPanel.tsx'
-import { createConfigGenerationsStore } from './store.ts'
-import type { ConfigGenerationsStore } from './store.ts'
+import { TimeMachinePanel } from './TimeMachinePanel.tsx'
+import type { TimeMachinePanelFace } from './TimeMachinePanel.tsx'
+import { createTimeMachineStore } from './store.ts'
+import type { TimeMachineStore } from './store.ts'
 import { en, NS, zh } from './locales.ts'
 
-export type { ConfigGenerationsStore } from './store.ts'
-export type { ConfigGenerationsState, DetailState, ListStatus, RestoreState } from './store.ts'
-export type { ConfigGenerationsPanelFace, ConfigGenerationsPanelProps } from './ConfigGenerationsPanel.tsx'
-export type { ConfigGenerationsKey } from './locales.ts'
+export type { TimeMachineStore } from './store.ts'
+export type { TimeMachineState, DetailState, ListStatus, RestoreState } from './store.ts'
+export type { TimeMachinePanelFace, TimeMachinePanelProps } from './TimeMachinePanel.tsx'
+export type { TimeMachineKey } from './locales.ts'
 
 /** Required services: slot registry, dictionary registry, and the wire client. */
 export const inject = ['slots', 'locale', 'connection']
 
-type Actions = BoundActions<ConfigGenerationsStore>
+type Actions = BoundActions<TimeMachineStore>
 
 /** Wire error line: code plus message, so a refusal-shaped RPC error stays distinguishable. */
 function rpcMessage(error: { code: string; message: string }): string {
@@ -54,14 +54,14 @@ function thrownMessage(error: unknown): string {
  * @param ctx - client root context.
  */
 export function apply(ctx: ClientContext): void {
-  ctx.effect(() => ctx.locale.register(NS, { zh, en }), 'ui-config-generations: dictionaries')
+  ctx.effect(() => ctx.locale.register(NS, { zh, en }), 'ui-timemachine: dictionaries')
 
   const rpc = (ctx.get('connection') as unknown as ConnectionHandle).rpc
   // Narrow the carrier's `RpcResult<unknown>` to this channel's vocabulary;
   // the channel's wire contract lives in ../rpc.ts.
-  const call = <T>(endpoint: string, payload: unknown): Promise<ConfigGenerationsRpcResult<T>> =>
-    rpc.call(CONFIG_GENERATIONS_CHANNEL, endpoint, payload) as Promise<ConfigGenerationsRpcResult<T>>
-  const store = createConfigGenerationsStore()
+  const call = <T>(endpoint: string, payload: unknown): Promise<TimeMachineRpcResult<T>> =>
+    rpc.call(TIMEMACHINE_CHANNEL, endpoint, payload) as Promise<TimeMachineRpcResult<T>>
+  const store = createTimeMachineStore()
   // The store instance is framework-made; the inject factory hands its baked
   // actions up so the connection/reset path below can drive the same instance.
   let bound: Actions | undefined
@@ -79,10 +79,10 @@ export function apply(ctx: ClientContext): void {
     listInFlight = true
     const issued = epoch
     actions.listBegin()
-    void call<ConfigGenerationsListResponse>('list', {}).then((result) => {
+    void call<TimeMachineListResponse>('list', {}).then((result) => {
       if (issued !== epoch) return
       if (!result.ok) {
-        if (result.error.code === 'config-generation-absent') actions.listAbsent()
+        if (result.error.code === 'timemachine-absent') actions.listAbsent()
         else actions.listFailed(rpcMessage(result.error))
         return
       }
@@ -99,7 +99,7 @@ export function apply(ctx: ClientContext): void {
     detailEpoch += 1
     const issued = detailEpoch
     actions.select(id)
-    void call<ConfigGenerationsReadResponse>('read', { id }).then((result) => {
+    void call<TimeMachineReadResponse>('read', { id }).then((result) => {
       if (issued !== detailEpoch) return
       if (!result.ok) {
         actions.detailFailed(id, rpcMessage(result.error))
@@ -115,7 +115,7 @@ export function apply(ctx: ClientContext): void {
   const restore = (actions: Actions, id: string): void => {
     const issued = epoch
     actions.restoreWorking(id)
-    void call<ConfigGenerationsRestoreResponse>('restore', { id }).then((result) => {
+    void call<TimeMachineRestoreResponse>('restore', { id }).then((result) => {
       if (issued !== epoch) return
       if (!result.ok) {
         actions.restoreFailed(id, rpcMessage(result.error))
@@ -131,7 +131,7 @@ export function apply(ctx: ClientContext): void {
     })
   }
 
-  const injected = (actions: Actions): ConfigGenerationsPanelFace => {
+  const injected = (actions: Actions): TimeMachinePanelFace => {
     bound = actions
     return {
       onRefresh: () => { refresh(actions) },
@@ -149,11 +149,11 @@ export function apply(ctx: ClientContext): void {
 
   ctx.slots.inject('sidebar.footer.action', () => ctx.slots.register({
     name: 'sidebar.footer.action',
-    id: 'config-generations-panel',
+    id: 'timemachine-panel',
     locale: NS,
     store,
     inject: injected,
-  }, ConfigGenerationsPanel))
+  }, TimeMachinePanel))
 
   ctx.on('connection/reset', () => {
     epoch += 1

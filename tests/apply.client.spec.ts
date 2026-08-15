@@ -2,7 +2,7 @@
  * The browser half on a real cordis Context with a fake Connection RPC face
  * and the real SlotRegistry: dictionaries and the footer panel entry register
  * (and fold up on fiber disposal — HMR safety), the injected face drives the
- * /configGenerations RPCs into the declared store with single-flight reads and
+ * /timemachine RPCs into the declared store with single-flight reads and
  * stale-answer guards, and connection/reset restarts the roster read.
  */
 import { Context } from '@deepseek-ai/cordis'
@@ -11,13 +11,13 @@ import { SlotRegistry } from '@deepseek-ai/dsh-client-runtime/client'
 import { LocaleRuntime } from '@deepseek-ai/dsh-client-locale/client'
 import type { ConfigGeneration, RestoreResult } from '../src/types.ts'
 import type {
-  ConfigGenerationsListResponse,
-  ConfigGenerationsRpcResult,
+  TimeMachineListResponse,
+  TimeMachineRpcResult,
   GenerationSummary,
 } from '../src/rpc.ts'
 import { apply, inject } from '../src/client/index.ts'
-import type { ConfigGenerationsPanelFace, ConfigGenerationsStore } from '../src/client/index.ts'
-import { createConfigGenerationsStore } from '../src/client/store.ts'
+import type { TimeMachinePanelFace, TimeMachineStore } from '../src/client/index.ts'
+import { createTimeMachineStore } from '../src/client/store.ts'
 import { en, NS, zh } from '../src/client/locales.ts'
 
 interface Deferred<T> {
@@ -36,11 +36,11 @@ function deferred<T>(): Deferred<T> {
   return { promise, resolve, reject }
 }
 
-function rpcOk<T>(value: T): ConfigGenerationsRpcResult<T> {
+function rpcOk<T>(value: T): TimeMachineRpcResult<T> {
   return { ok: true, value }
 }
 
-function rpcErr(code: string, message: string): ConfigGenerationsRpcResult<never> {
+function rpcErr(code: string, message: string): TimeMachineRpcResult<never> {
   return { ok: false, error: { code: code as never, message, details: {} } }
 }
 
@@ -70,12 +70,12 @@ const GENERATION: ConfigGeneration = {
 }
 
 /**
- * Scripted `/configGenerations` channel face: `call` dispatches by endpoint
+ * Scripted `/timemachine` channel face: `call` dispatches by endpoint
  * onto the per-endpoint mocks the specs script.
  */
 function fakeApi() {
   const api = {
-    list: vi.fn((_payload: Record<string, never>) => Promise.resolve(rpcOk<ConfigGenerationsListResponse>({ generations: [SUMMARY], unreadable: [] }))),
+    list: vi.fn((_payload: Record<string, never>) => Promise.resolve(rpcOk<TimeMachineListResponse>({ generations: [SUMMARY], unreadable: [] }))),
     read: vi.fn((_payload: { id: string }) => Promise.resolve(rpcOk(GENERATION))),
     restore: vi.fn((_payload: { id: string }) => Promise.resolve(rpcOk<RestoreResult>({
       id: GENERATION.id,
@@ -83,8 +83,8 @@ function fakeApi() {
       changes: ['wrote package.json'],
     }))),
   }
-  const call = vi.fn((channel: string, endpoint: string, payload: unknown): Promise<ConfigGenerationsRpcResult<unknown>> => {
-    if (channel !== '/configGenerations') throw new Error(`unexpected channel ${channel}`)
+  const call = vi.fn((channel: string, endpoint: string, payload: unknown): Promise<TimeMachineRpcResult<unknown>> => {
+    if (channel !== '/timemachine') throw new Error(`unexpected channel ${channel}`)
     if (endpoint === 'list') return api.list(payload as Record<string, never>)
     if (endpoint === 'read') return api.read(payload as { id: string })
     if (endpoint === 'restore') return api.restore(payload as { id: string })
@@ -110,15 +110,15 @@ async function bench(api: FakeApi) {
 }
 
 /** Materialize the panel entry's inject face over a test-created store instance. */
-function faceOf(ctx: Context): { face: ConfigGenerationsPanelFace; store: ReturnType<ConfigGenerationsStore['create']> } {
-  const entry = ctx.slots.entries('sidebar.footer.action').find(candidate => candidate.options.id === 'config-generations-panel')
+function faceOf(ctx: Context): { face: TimeMachinePanelFace; store: ReturnType<TimeMachineStore['create']> } {
+  const entry = ctx.slots.entries('sidebar.footer.action').find(candidate => candidate.options.id === 'timemachine-panel')
   expect(entry).toBeDefined()
-  const store = createConfigGenerationsStore().create()
-  const factory = entry!.inject as unknown as (actions: ReturnType<ConfigGenerationsStore['create']>['actions']) => ConfigGenerationsPanelFace
+  const store = createTimeMachineStore().create()
+  const factory = entry!.inject as unknown as (actions: ReturnType<TimeMachineStore['create']>['actions']) => TimeMachinePanelFace
   return { face: factory(store.actions), store }
 }
 
-describe('config-generations browser half', () => {
+describe('timemachine browser half', () => {
   it('declares the services it binds', () => {
     expect(inject).toEqual(['slots', 'locale', 'connection'])
   })
@@ -134,7 +134,7 @@ describe('config-generations browser half', () => {
     expect(translate('panel.title')).toBe(zh['panel.title'])
     ctx.locale.setLocale('en')
     expect(translate('panel.title')).toBe(en['panel.title'])
-    expect(ctx.slots.entries('sidebar.footer.action').map(entry => entry.options.id)).toEqual(['config-generations-panel'])
+    expect(ctx.slots.entries('sidebar.footer.action').map(entry => entry.options.id)).toEqual(['timemachine-panel'])
     await fiber.dispose()
     expect(ctx.slots.entries('sidebar.footer.action')).toHaveLength(0)
     expect(translate('panel.title')).not.toBe(en['panel.title'])
@@ -148,7 +148,7 @@ describe('config-generations browser half', () => {
     const api = fakeApi()
     const { ctx } = await bench(api)
     const { face, store } = faceOf(ctx)
-    const pending = deferred<ConfigGenerationsRpcResult<ConfigGenerationsListResponse>>()
+    const pending = deferred<TimeMachineRpcResult<TimeMachineListResponse>>()
     api.list.mockReturnValueOnce(pending.promise)
     face.onRefresh()
     face.onRefresh()
@@ -162,19 +162,19 @@ describe('config-generations browser half', () => {
     await vi.waitFor(() => { expect(api.list).toHaveBeenCalledTimes(2) })
   })
 
-  it('maps config-generation-absent to the absent phase, other RPC errors and throws to a kept roster plus message', async () => {
+  it('maps timemachine-absent to the absent phase, other RPC errors and throws to a kept roster plus message', async () => {
     const api = fakeApi()
     const { ctx } = await bench(api)
     const { face, store } = faceOf(ctx)
 
-    api.list.mockResolvedValueOnce(rpcErr('config-generation-absent', 'no profile boot'))
+    api.list.mockResolvedValueOnce(rpcErr('timemachine-absent', 'no profile boot'))
     face.onRefresh()
     await vi.waitFor(() => { expect(store.getSnapshot().list).toBe('absent') })
 
-    api.list.mockResolvedValueOnce(rpcErr('config-generation-not-found', 'gone'))
+    api.list.mockResolvedValueOnce(rpcErr('timemachine-not-found', 'gone'))
     face.onRefresh()
     await vi.waitFor(() => { expect(store.getSnapshot().list).toBe('failed') })
-    expect(store.getSnapshot().listError).toBe('config-generation-not-found: gone')
+    expect(store.getSnapshot().listError).toBe('timemachine-not-found: gone')
 
     api.list.mockRejectedValueOnce(new Error('connection refused'))
     face.onRefresh()
@@ -190,8 +190,8 @@ describe('config-generations browser half', () => {
     const { ctx } = await bench(api)
     const { face, store } = faceOf(ctx)
 
-    const first = deferred<ConfigGenerationsRpcResult<ConfigGeneration>>()
-    const second = deferred<ConfigGenerationsRpcResult<ConfigGeneration>>()
+    const first = deferred<TimeMachineRpcResult<ConfigGeneration>>()
+    const second = deferred<TimeMachineRpcResult<ConfigGeneration>>()
     api.read.mockReturnValueOnce(first.promise).mockReturnValueOnce(second.promise)
     face.onSelect('aaa')
     face.onSelect('bbb')
@@ -202,7 +202,7 @@ describe('config-generations browser half', () => {
     second.resolve(rpcOk(GENERATION))
     await vi.waitFor(() => { expect(store.getSnapshot().detail).toEqual({ status: 'loaded', generation: GENERATION }) })
 
-    const orphan = deferred<ConfigGenerationsRpcResult<ConfigGeneration>>()
+    const orphan = deferred<TimeMachineRpcResult<ConfigGeneration>>()
     api.read.mockReturnValueOnce(orphan.promise)
     face.onSelect('ccc')
     face.onDeselect()
@@ -211,8 +211,8 @@ describe('config-generations browser half', () => {
     await Promise.resolve()
     expect(store.getSnapshot().detail).toEqual({ status: 'idle' })
 
-    const rejected = deferred<ConfigGenerationsRpcResult<ConfigGeneration>>()
-    const current = deferred<ConfigGenerationsRpcResult<ConfigGeneration>>()
+    const rejected = deferred<TimeMachineRpcResult<ConfigGeneration>>()
+    const current = deferred<TimeMachineRpcResult<ConfigGeneration>>()
     api.read.mockReturnValueOnce(rejected.promise).mockReturnValueOnce(current.promise)
     face.onSelect('ddd')
     face.onSelect('eee')
@@ -229,10 +229,10 @@ describe('config-generations browser half', () => {
     const { ctx } = await bench(api)
     const { face, store } = faceOf(ctx)
 
-    api.read.mockResolvedValueOnce(rpcErr('config-generation-ambiguous', 'two matches'))
+    api.read.mockResolvedValueOnce(rpcErr('timemachine-ambiguous', 'two matches'))
     face.onSelect('ab')
     await vi.waitFor(() => {
-      expect(store.getSnapshot().detail).toEqual({ status: 'failed', id: 'ab', message: 'config-generation-ambiguous: two matches' })
+      expect(store.getSnapshot().detail).toEqual({ status: 'failed', id: 'ab', message: 'timemachine-ambiguous: two matches' })
     })
 
     api.read.mockRejectedValueOnce(new Error('socket closed'))
@@ -288,10 +288,10 @@ describe('config-generations browser half', () => {
     const { ctx } = await bench(api)
     const { face, store } = faceOf(ctx)
 
-    api.restore.mockResolvedValueOnce(rpcErr('config-generation-not-found', 'gone'))
+    api.restore.mockResolvedValueOnce(rpcErr('timemachine-not-found', 'gone'))
     face.onRestore('ghost')
     await vi.waitFor(() => {
-      expect(store.getSnapshot().restore).toEqual({ status: 'failed', id: 'ghost', message: 'config-generation-not-found: gone' })
+      expect(store.getSnapshot().restore).toEqual({ status: 'failed', id: 'ghost', message: 'timemachine-not-found: gone' })
     })
     await vi.waitFor(() => { expect(api.list).toHaveBeenCalledTimes(1) })
 
@@ -318,9 +318,9 @@ describe('config-generations browser half', () => {
     face.onSelect('aaa')
     await vi.waitFor(() => { expect(store.getSnapshot().detail.status).toBe('loaded') })
 
-    const staleList = deferred<ConfigGenerationsRpcResult<ConfigGenerationsListResponse>>()
-    const freshList = deferred<ConfigGenerationsRpcResult<ConfigGenerationsListResponse>>()
-    const staleRestore = deferred<ConfigGenerationsRpcResult<RestoreResult>>()
+    const staleList = deferred<TimeMachineRpcResult<TimeMachineListResponse>>()
+    const freshList = deferred<TimeMachineRpcResult<TimeMachineListResponse>>()
+    const staleRestore = deferred<TimeMachineRpcResult<RestoreResult>>()
     api.list.mockReturnValueOnce(staleList.promise).mockReturnValueOnce(freshList.promise)
     api.restore.mockReturnValueOnce(staleRestore.promise)
     face.onRefresh()
@@ -356,9 +356,9 @@ describe('config-generations browser half', () => {
     const { ctx } = await bench(api)
     const { face, store } = faceOf(ctx)
 
-    const staleList = deferred<ConfigGenerationsRpcResult<ConfigGenerationsListResponse>>()
-    const freshList = deferred<ConfigGenerationsRpcResult<ConfigGenerationsListResponse>>()
-    const staleRestore = deferred<ConfigGenerationsRpcResult<RestoreResult>>()
+    const staleList = deferred<TimeMachineRpcResult<TimeMachineListResponse>>()
+    const freshList = deferred<TimeMachineRpcResult<TimeMachineListResponse>>()
+    const staleRestore = deferred<TimeMachineRpcResult<RestoreResult>>()
     api.list.mockReturnValueOnce(staleList.promise).mockReturnValueOnce(freshList.promise)
     api.restore.mockReturnValueOnce(staleRestore.promise)
     face.onRefresh()

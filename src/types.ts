@@ -1,6 +1,6 @@
 /**
  * Persisted record types for `dsh` configuration generations.
- * @module @deepseek-ai/dsh-config-generations/types
+ * @module dsh-timemachine/types
  */
 
 /** The three durable files a profile's plugin tree is composed from. */

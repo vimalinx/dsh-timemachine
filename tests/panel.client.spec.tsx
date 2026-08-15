@@ -1,6 +1,6 @@
 // @vitest-environment jsdom
 /**
- * ConfigGenerationsPanel behavior spec: the trigger opens the roster (and
+ * TimeMachinePanel behavior spec: the trigger opens the roster (and
  * refreshes on mount/open), every roster phase renders its own copy, the
  * unreadable warning and kept-rows failure strip show, rows expand into the
  * detail (bundles, outcome timeline, read-only render), and the restore flow
@@ -14,9 +14,9 @@ import type { SessionListState, WorkspaceListState } from '@deepseek-ai/dsh-clie
 import { makeTranslate } from '@deepseek-ai/dsh-client-test-runtime'
 import type { ConfigGeneration, RestoreResult } from '../src/types.ts'
 import type { GenerationSummary } from '../src/rpc.ts'
-import { ConfigGenerationsPanel } from '../src/client/ConfigGenerationsPanel.tsx'
-import type { ConfigGenerationsPanelFace } from '../src/client/ConfigGenerationsPanel.tsx'
-import { createConfigGenerationsStore } from '../src/client/store.ts'
+import { TimeMachinePanel } from '../src/client/TimeMachinePanel.tsx'
+import type { TimeMachinePanelFace } from '../src/client/TimeMachinePanel.tsx'
+import { createTimeMachineStore } from '../src/client/store.ts'
 import { zh } from '../src/client/locales.ts'
 
 // The framework-injected t seat, stubbed over the zh dictionaries (the default locale).
@@ -93,9 +93,9 @@ const GENERATION: ConfigGeneration = {
   ],
 }
 
-function bench(faceOverrides: Partial<ConfigGenerationsPanelFace> = {}, wide = true) {
-  const store = createConfigGenerationsStore().create()
-  const face: ConfigGenerationsPanelFace = {
+function bench(faceOverrides: Partial<TimeMachinePanelFace> = {}, wide = true) {
+  const store = createTimeMachineStore().create()
+  const face: TimeMachinePanelFace = {
     onRefresh: vi.fn(),
     onSelect: vi.fn(),
     onDeselect: vi.fn(),
@@ -106,7 +106,7 @@ function bench(faceOverrides: Partial<ConfigGenerationsPanelFace> = {}, wide = t
     ...faceOverrides,
   }
   const view = render(
-    <ConfigGenerationsPanel
+    <TimeMachinePanel
       wide={wide}
       useStore={bindSnapshotSelector(store)}
       actions={store.actions}
@@ -124,7 +124,7 @@ function openPanel() {
   fireEvent.click(screen.getByRole('button', { name: '配置代' }))
 }
 
-describe('ConfigGenerationsPanel', () => {
+describe('TimeMachinePanel', () => {
   it('refreshes on mount and on open, and toggles closed', () => {
     const { face, view } = bench()
     expect(face.onRefresh).toHaveBeenCalledTimes(1)
@@ -191,9 +191,9 @@ describe('ConfigGenerationsPanel', () => {
     act(() => {
       store.actions.listLoaded([SUMMARY], [])
       store.actions.select(SUMMARY.id)
-      store.actions.detailFailed(SUMMARY.id, 'config-generation-not-found: gone')
+      store.actions.detailFailed(SUMMARY.id, 'timemachine-not-found: gone')
     })
-    expect(screen.getByRole('alert').textContent).toContain('读取详情失败：config-generation-not-found: gone')
+    expect(screen.getByRole('alert').textContent).toContain('读取详情失败：timemachine-not-found: gone')
   })
 
   it('renders the loaded detail: bundle versions, outcome timeline, and the read-only render', () => {
@@ -365,9 +365,9 @@ describe('ConfigGenerationsPanel', () => {
       store.actions.listLoaded([SUMMARY], [])
       store.actions.select(SUMMARY.id)
       store.actions.detailLoaded(GENERATION)
-      store.actions.restoreFailed(SUMMARY.id, 'config-generation-not-found: gone')
+      store.actions.restoreFailed(SUMMARY.id, 'timemachine-not-found: gone')
     })
-    expect(screen.getByRole('alert').textContent).toContain('恢复失败：config-generation-not-found: gone')
+    expect(screen.getByRole('alert').textContent).toContain('恢复失败：timemachine-not-found: gone')
     fireEvent.click(screen.getByRole('button', { name: '知道了' }))
     expect(face.onDismissRestoreResult).toHaveBeenCalledTimes(1)
   })

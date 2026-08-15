@@ -1,4 +1,4 @@
-# dsh-config-generations
+# dsh-timemachine
 
 [English](README.md) | 中文
 
@@ -11,14 +11,14 @@
 包发布到 npm 之后：
 
 ```sh
-dsh plugin --profile web add dsh-config-generations
+dsh plugin --profile web add dsh-timemachine
 ```
 
 发布之前，可以从 tarball 或 git URL 安装——同一条命令两种形式都接受：
 
 ```sh
-dsh plugin --profile web add ./dsh-config-generations-0.1.0.tgz
-dsh plugin --profile web add git+https://github.com/Electricitysheep/dsh-config-generations.git
+dsh plugin --profile web add ./dsh-timemachine-0.1.0.tgz
+dsh plugin --profile web add git+https://github.com/vimalinx/dsh-timemachine.git
 ```
 
 安装后启动一次 `web` profile；第一代会在那次启动时被记录。
@@ -38,14 +38,14 @@ dsh plugin --profile web add git+https://github.com/Electricitysheep/dsh-config-
 
 ## 独立 CLI
 
-本包附带 `dsh-config-generations` 可执行文件，供在已启动的树之外的 shell 中使用：
+本包附带 `dsh-timemachine` 可执行文件，供在已启动的树之外的 shell 中使用：
 
 ```sh
-dsh-config-generations log --profile web       # 列出已记录的配置，最旧在前
-dsh-config-generations show --profile web <id> # 打印一份配置的组合结果
-dsh-config-generations diff --profile web <id> [id]
+dsh-timemachine log --profile web       # 列出已记录的配置，最旧在前
+dsh-timemachine show --profile web <id> # 打印一份配置的组合结果
+dsh-timemachine diff --profile web <id> [id]
                                                # 比较两份组合（默认与最新一份比较）
-dsh-config-generations restore --profile web <id>
+dsh-timemachine restore --profile web <id>
                                                # 把一份配置的输入文件写回
 ```
 
@@ -61,7 +61,7 @@ CLI 在 Harness home 下解析 profile：环境变量 `DSH_HOME` 已设置且非
 2. profile 补丁层——`<profile>/cordis.patch.yml`；
 3. home 补丁层——`$DSH_HOME/cordis.patch.yml`，叠在每个 profile 自己的补丁层之上。
 
-每条记录位于 `<profile>/config-generations/<id>.json`，`<id>` 是三份输入文本摘要的前 12 位十六进制字符。除输入外，记录还携带这些输入渲染出的组合结果、每个 bundle 层解析到的版本、以及针对该配置的每次启动结果。
+每条记录位于 `<profile>/timemachine/<id>.json`，`<id>` 是三份输入文本摘要的前 12 位十六进制字符。除输入外，记录还携带这些输入渲染出的组合结果、每个 bundle 层解析到的版本、以及针对该配置的每次启动结果。
 
 **记录的是变更，不是启动。** 以未变化的配置再次启动，只会向已有记录追加一个新的启动结果，而不是新增一条记录。`recordedAt` 标记该配置首次出现的时间，永不移动；`lastSeenAt` 决定历史顺序。
 
@@ -80,7 +80,7 @@ CLI 在 Harness home 下解析 profile：环境变量 `DSH_HOME` 已设置且非
 ## 限制
 
 - **恢复在下次启动时才生效**，从不在运行中的进程内生效。
-- **与把该功能补丁进 dsh 核心的 fork 方案互斥。** 两者挂载同一个 `configGenerations` 服务与 RPC 面；请只对原版（stock）dsh 安装使用本插件。
+- **与把该功能补丁进 dsh 核心的 fork 方案互斥。** 两者挂载同一个 `timemachine` 服务与 RPC 面；请只对原版（stock）dsh 安装使用本插件。
 - **Loopback 边界。** Web 面板通过一个以 `authority: 'loopback'` 注册的 Connection RPC 通道与服务通信——只应答同主机客户端，远程连接不可达。
 - **运行期的补丁重载不新增一代。** `dsh` 运行期间做出的编辑只会在下次启动时被记录。
 - **每次调用的瞬时输入不可恢复。** `--patch` 覆盖层与环境开关会记录在启动结果上供参考，但从不写回，因为它们并不持久。

@@ -11,7 +11,7 @@ import { defineStore, type EngineStoreHandle } from '@deepseek-ai/dsh-client-run
 import type { GenerationSummary } from '../rpc.ts'
 import type { ConfigGeneration, RestoreResult, UnreadableGeneration } from '../types.ts'
 
-/** Roster read phase. `absent` is the host's `config-generation-absent` answer, not a failure. */
+/** Roster read phase. `absent` is the host's `timemachine-absent` answer, not a failure. */
 export type ListStatus = 'idle' | 'loading' | 'loaded' | 'absent' | 'failed'
 
 /** Selected generation's detail read. */
@@ -34,7 +34,7 @@ export type RestoreState =
   | { readonly status: 'failed'; readonly id: string; readonly message: string }
 
 /** Panel state. */
-export interface ConfigGenerationsState {
+export interface TimeMachineState {
   /** Roster read phase. */
   list: ListStatus
   /** Last roster read failure; kept beside the rows it failed to refresh. */
@@ -54,28 +54,28 @@ export interface ConfigGenerationsState {
 }
 
 /** Declared action shape giving the exported factory a stable return type. */
-type ConfigGenerationsActions = {
-  listBegin: (draft: ConfigGenerationsState) => void
-  listLoaded: (draft: ConfigGenerationsState, generations: GenerationSummary[], unreadable: UnreadableGeneration[]) => void
-  listAbsent: (draft: ConfigGenerationsState) => void
-  listFailed: (draft: ConfigGenerationsState, message: string) => void
-  select: (draft: ConfigGenerationsState, id: string) => void
-  closeDetail: (draft: ConfigGenerationsState) => void
-  detailLoaded: (draft: ConfigGenerationsState, generation: ConfigGeneration) => void
-  detailFailed: (draft: ConfigGenerationsState, id: string, message: string) => void
-  confirmRestore: (draft: ConfigGenerationsState, id: string) => void
-  cancelRestore: (draft: ConfigGenerationsState) => void
-  restoreWorking: (draft: ConfigGenerationsState, id: string) => void
-  restoreDone: (draft: ConfigGenerationsState, result: RestoreResult) => void
-  restoreFailed: (draft: ConfigGenerationsState, id: string, message: string) => void
-  dismissRestore: (draft: ConfigGenerationsState) => void
-  reset: (draft: ConfigGenerationsState) => void
+type TimeMachineActions = {
+  listBegin: (draft: TimeMachineState) => void
+  listLoaded: (draft: TimeMachineState, generations: GenerationSummary[], unreadable: UnreadableGeneration[]) => void
+  listAbsent: (draft: TimeMachineState) => void
+  listFailed: (draft: TimeMachineState, message: string) => void
+  select: (draft: TimeMachineState, id: string) => void
+  closeDetail: (draft: TimeMachineState) => void
+  detailLoaded: (draft: TimeMachineState, generation: ConfigGeneration) => void
+  detailFailed: (draft: TimeMachineState, id: string, message: string) => void
+  confirmRestore: (draft: TimeMachineState, id: string) => void
+  cancelRestore: (draft: TimeMachineState) => void
+  restoreWorking: (draft: TimeMachineState, id: string) => void
+  restoreDone: (draft: TimeMachineState, result: RestoreResult) => void
+  restoreFailed: (draft: TimeMachineState, id: string, message: string) => void
+  dismissRestore: (draft: TimeMachineState) => void
+  reset: (draft: TimeMachineState) => void
 }
 
 /** The panel store handle type, consumed type-only by the component's props. */
-export type ConfigGenerationsStore = EngineStoreHandle<ConfigGenerationsState, ConfigGenerationsActions>
+export type TimeMachineStore = EngineStoreHandle<TimeMachineState, TimeMachineActions>
 
-function initialState(): ConfigGenerationsState {
+function initialState(): TimeMachineState {
   return {
     list: 'idle',
     listError: undefined,
@@ -92,7 +92,7 @@ function initialState(): ConfigGenerationsState {
  * Declare the panel store.
  * @returns the store handle (the framework or a spec calls `.create()`).
  */
-export function createConfigGenerationsStore(): ConfigGenerationsStore {
+export function createTimeMachineStore(): TimeMachineStore {
   return defineStore({
     init: initialState,
     actions: {

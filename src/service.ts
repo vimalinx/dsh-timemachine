@@ -1,5 +1,5 @@
 /**
- * `ctx.configGenerations` — the configuration history as an in-tree service.
+ * `ctx.timemachine` — the configuration history as an in-tree service.
  *
  * The service derives the booted profile from the Loader's `ctx.baseUrl`
  * anchor ({@link deriveProfileHost}) instead of a launcher-filled context
@@ -9,7 +9,7 @@
  * Composing a profile goes through `@deepseek-ai/dsh-app-boot`'s
  * `loadProfile`/`renderConfigDump` (rebuilt in `./host-profile.ts`), so
  * verifying a restore uses the one composition path a boot uses.
- * @module dsh-config-generations/service
+ * @module dsh-timemachine/service
  */
 
 import { existsSync, readFileSync, rmSync } from 'node:fs'
@@ -36,7 +36,7 @@ import type {
 } from './types.ts'
 
 /**
- * The Loader-service slice {@link ConfigGenerations.recordBoot} settles a boot
+ * The Loader-service slice {@link TimeMachine.recordBoot} settles a boot
  * against (structural: the service is not a declared dependency of this
  * package). Mirrors the launcher's post-boot audit
  * (`assertEntriesLoaded`/`assertEntriesActivated` in `dsh-app-boot`): a
@@ -54,7 +54,7 @@ interface LoaderSettlement {
  * empty history and refuses to record or restore, rather than guessing at a
  * profile directory.
  */
-export default class ConfigGenerations extends Service {
+export default class TimeMachine extends Service {
   /** The derived profile facts and composition closures; absent outside a `dsh` profile boot. */
   private readonly host: ConfigGenerationHost | undefined
   /** The generation this process recorded for its own boot; `undefined` until {@link recordBoot} settles. */
@@ -65,7 +65,7 @@ export default class ConfigGenerations extends Service {
    * @param host - explicit host facts (tests); derived from `ctx.baseUrl` when omitted.
    */
   constructor(ctx: Context, host?: ConfigGenerationHost) {
-    super(ctx, 'configGenerations')
+    super(ctx, 'timemachine')
     this.host = host ?? deriveProfileHost(ctx.baseUrl)
   }
 
@@ -172,7 +172,7 @@ export default class ConfigGenerations extends Service {
         ? { at: new Date().toISOString(), status: 'activated', overlays: [] }
         : { at: new Date().toISOString(), status: 'failed', overlays: [], error: failure })
     } catch (error) {
-      process.stderr.write(`dsh-config-generations: warning: could not record this boot's outcome: ${String(error)}\n`)
+      process.stderr.write(`dsh-timemachine: warning: could not record this boot's outcome: ${String(error)}\n`)
     }
   }
 
@@ -273,7 +273,7 @@ function refusalText(generation: ConfigGeneration, drift: readonly BundleDrift[]
 
 declare module '@deepseek-ai/cordis' {
   interface Context {
-    /** The booted profile's configuration history; mounted by `dsh-config-generations`. */
-    configGenerations: ConfigGenerations
+    /** The booted profile's configuration history; mounted by `dsh-timemachine`. */
+    timemachine: TimeMachine
   }
 }

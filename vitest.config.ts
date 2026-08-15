@@ -12,8 +12,8 @@ export default defineConfig({
     alias: {
       '@deepseek-ai/dsh-client-runtime/client': fileURLToPath(new URL('./tests/shims/runtime-client.ts', import.meta.url)),
       '@deepseek-ai/dsh-client-locale/client': fileURLToPath(new URL('./tests/shims/locale-client.ts', import.meta.url)),
-      'dsh-config-generations/invariant': fileURLToPath(new URL('./src/invariant.ts', import.meta.url)),
-      'dsh-config-generations': fileURLToPath(new URL('./src/index.ts', import.meta.url)),
+      'dsh-timemachine/invariant': fileURLToPath(new URL('./src/invariant.ts', import.meta.url)),
+      'dsh-timemachine': fileURLToPath(new URL('./src/index.ts', import.meta.url)),
     },
   },
   test: {

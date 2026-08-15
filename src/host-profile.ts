@@ -16,7 +16,7 @@
  * `readBundleStamps` below are copies of the launcher's private functions of
  * the same names (source: `apps/cli/src/profile-boot.ts`), narrowed to the
  * facts this package needs.
- * @module dsh-config-generations/host-profile
+ * @module dsh-timemachine/host-profile
  */
 
 import { existsSync, readFileSync, writeFileSync } from 'node:fs'
@@ -34,7 +34,7 @@ import {
 import type { BundleStamp, ConfigGenerationHost, GenerationInputs } from './types.ts'
 
 /** Diagnostic prefix on errors this package raises. */
-const NAME = 'dsh-config-generations'
+const NAME = 'dsh-timemachine'
 
 /**
  * Resolution anchor standing in for the launcher's `INSTALL_ANCHOR` (this

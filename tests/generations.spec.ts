@@ -2,7 +2,7 @@
  * Behavior of the configuration-generation store: how a configuration is
  * addressed, when a boot adds a record versus an outcome, what retention keeps,
  * and when a restore is refused.
- * @module dsh-config-generations/tests/config-generations
+ * @module dsh-timemachine/tests/timemachine
  */
 
 import { mkdtempSync, mkdirSync, readdirSync, rmSync, writeFileSync } from 'node:fs'
@@ -30,7 +30,7 @@ import {
 let profileDir: string
 
 beforeEach(() => {
-  profileDir = mkdtempSync(join(tmpdir(), 'dsh-config-generations-'))
+  profileDir = mkdtempSync(join(tmpdir(), 'dsh-timemachine-'))
 })
 
 afterEach(() => {

@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 /**
- * `dsh-config-generations <action> --profile <name>` — standalone version
+ * `dsh-timemachine <action> --profile <name>` — standalone version
  * control over a profile's plugin-tree configuration, for shells outside a
  * booted tree (the in-tree service and the web panel cover the live side).
  *
@@ -14,7 +14,7 @@
  * The composition names installed bundle packages, so replacing only the input
  * files after a bundle changed would compose a different tree and still look
  * like a successful return to an earlier state.
- * @module dsh-config-generations/cli
+ * @module dsh-timemachine/cli
  */
 
 import { existsSync, readFileSync, realpathSync, rmSync } from 'node:fs'
@@ -38,7 +38,7 @@ import {
 } from './host-profile.ts'
 import type { BundleStamp, ConfigGeneration } from './types.ts'
 
-const NAME = 'dsh-config-generations'
+const NAME = 'dsh-timemachine'
 
 /**
  * Heal the shared module fallback against this package's own anchor before

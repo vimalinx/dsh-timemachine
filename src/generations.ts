@@ -7,7 +7,7 @@
  * the history records changes rather than launches: booting the same
  * configuration twice appends a second outcome to one record instead of adding a
  * second record. Records are one file each under
- * `<profile>/config-generations/`, which is what lets concurrent `dsh` processes
+ * `<profile>/timemachine/`, which is what lets concurrent `dsh` processes
  * write without an append race.
  *
  * Reads and writes depend on no Cordis service, because the boot this records
@@ -18,7 +18,7 @@
  * tree and rendering it belong to the profile host (`./host-profile.ts`),
  * which rebuilds the launcher's `loadProfile()`/`renderConfigDump()` closures;
  * callers pass the rendered result in.
- * @module dsh-config-generations/generations
+ * @module dsh-timemachine/generations
  */
 
 import { createHash } from 'node:crypto'
@@ -51,7 +51,7 @@ export type * from './types.ts'
 export const GENERATION_FORMAT_VERSION = 2
 
 /** The generations directory inside a profile directory. */
-export const GENERATIONS_DIRNAME = 'config-generations'
+export const GENERATIONS_DIRNAME = 'timemachine'
 
 /**
  * How many generations one profile retains. The history answers "what did I

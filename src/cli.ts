@@ -6,9 +6,16 @@
  *
  * `log` lists what the profile has booted, `show` prints one configuration's
  * composition, `diff` compares two, and `restore` writes one configuration's
- * input files back. Verb behavior and output format mirror the launcher's
- * `dsh config` command (source: `apps/cli/src/config.ts` in deepseek-harness),
- * recomposed over this package's own profile host (`./host-profile.ts`).
+ * input files back. `undo`/`redo` step through the history, `snapshot` records
+ * the configuration as it stands, `remove` deletes one record, `status`
+ * reports undo/redo availability and boot health, `export`/`import` move the
+ * history as one zip, `prune` applies the retention bound on demand, and
+ * `settings` reads and writes the plugin's own settings. `gui` serves the
+ * rescue page (`./gui.ts`) for when no dsh tree boots at all. Verb behavior
+ * and output format mirror the launcher's `dsh config` command (source:
+ * `apps/cli/src/config.ts` in deepseek-harness), recomposed over this
+ * package's own profile host (`./host-profile.ts`) and the standalone
+ * operations (`./standalone.ts`).
  *
  * A restore refuses when the recorded composition can no longer be reproduced.
  * The composition names installed bundle packages, so replacing only the input
@@ -17,37 +24,36 @@
  * @module dsh-timemachine/cli
  */
 
-import { existsSync, readFileSync, realpathSync, rmSync } from 'node:fs'
-import { join } from 'node:path'
-import { fileURLToPath, pathToFileURL } from 'node:url'
-import { writeFileAtomic } from '@deepseek-ai/dsh-atomic-write'
-import { healProfilesModuleFallback, type Profile } from '@deepseek-ai/dsh-app-boot'
+import { readFileSync, realpathSync, writeFileSync } from 'node:fs'
+import { pathToFileURL } from 'node:url'
+import { exportGenerations, importGenerations } from './archive.ts'
 import {
-  compareForRestore,
-  digestText,
   lastActivated,
   latestStatus,
   readGenerations,
   selectGeneration,
 } from './generations.ts'
 import {
-  homePatchPath,
-  prepareProfile,
-  readBundleStamps,
-  renderDurableComposition,
-} from './host-profile.ts'
-import type { BundleStamp, ConfigGeneration } from './types.ts'
+  openProfile,
+  pruneStandalone,
+  redoStandalone,
+  removeStandalone,
+  restoreGeneration,
+  snapshotStandalone,
+  statusStandalone,
+  undoStandalone,
+  type StandaloneHost,
+} from './standalone.ts'
+import { readTimemachineSettings, writeTimemachineSettings } from './settings.ts'
+import type {
+  ConfigGeneration,
+  RestoreResult,
+  StackRestoreResult,
+  TimemachineSettings,
+  TimemachineSettingsPatch,
+} from './types.ts'
 
 const NAME = 'dsh-timemachine'
-
-/**
- * Heal the shared module fallback against this package's own anchor before
- * composing (source: profile-boot.ts `prepareProfile`). The fallback the boot
- * maintains already links the installation's closure; healing against this
- * anchor adds this package's, so a standalone restore composes through the
- * same two-anchor resolution a boot uses.
- */
-const INSTALL_ANCHOR = fileURLToPath(new URL('../package.json', import.meta.url))
 
 /** One `log` row: id, recency, boot outcome, and how many layers it composed. */
 function describe(generation: ConfigGeneration, activeId: string | undefined): string {
@@ -107,93 +113,114 @@ function runDiff(left: ConfigGeneration, right: ConfigGeneration): void {
   }
 }
 
-/** Replace one input file's contents, or delete it when the generation recorded none. */
-async function restoreInput(path: string, text: string | null): Promise<string> {
-  if (text === null) {
-    rmSync(path, { force: true })
-    return `removed ${path}`
+/** Report a restore's outcome the way `restore`, `undo`, and `redo` all print it. */
+function reportRestore(result: RestoreResult, verb: string, profile: string): number {
+  if (!result.restored) {
+    for (const line of (result.refusal ?? 'restore refused').split('\n')) {
+      process.stderr.write(`${NAME}: ${line}\n`)
+    }
+    return 1
   }
-  // Atomic replacement: a half-written patch layer is a profile that cannot
-  // boot, which is exactly what this command exists to get out of.
-  await writeFileAtomic(path, text, { mode: 0o600, dirMode: 0o700 })
-  return `wrote ${path}`
+  for (const change of result.changes) process.stdout.write(`${NAME}: ${change}\n`)
+  process.stdout.write(`${NAME}: profile ${profile} ${verb} configuration ${result.id}.\n`)
+  return 0
 }
 
-/** One input file's current contents, for putting it back. */
-interface InputSnapshot {
-  path: string
-  text: string | null
+/** Run one undo/redo step and report it; an empty stack is a refusal (exit 1). */
+function reportStep(step: StackRestoreResult, direction: 'undo' | 'redo', profile: string): number {
+  if (step.empty !== undefined) {
+    process.stderr.write(`${NAME}: ${direction === 'undo' ? 'nothing to undo' : 'nothing to redo'}.\n`)
+    return 1
+  }
+  if (step.result === undefined) return 1
+  return reportRestore(
+    step.result,
+    direction === 'undo' ? 'stepped back to' : 'stepped forward to',
+    profile,
+  )
 }
 
-/** The three input files a generation restores, paired with their recorded contents. */
-function restoreTargets(loaded: Profile, generation: ConfigGeneration): InputSnapshot[] {
-  return [
-    { path: join(loaded.dir, 'package.json'), text: generation.inputs.manifest },
-    { path: loaded.patchPath, text: generation.inputs.profilePatch },
-    { path: homePatchPath(), text: generation.inputs.homePatch },
-  ]
+/** Print the undo/redo availability, boot health, and latest configuration. */
+function runStatus(host: StandaloneHost, generations: readonly ConfigGeneration[]): void {
+  const status = statusStandalone(host)
+  const latest = generations.at(-1)
+  process.stdout.write(`profile: ${host.profile}\n`)
+  process.stdout.write(`generations: ${status.total}\n`)
+  process.stdout.write(`undo: ${status.canUndo ? 'available' : 'nothing to undo'}\n`)
+  process.stdout.write(`redo: ${status.canRedo ? 'available' : 'nothing to redo'}\n`)
+  process.stdout.write(`last boot: ${latest === undefined ? 'no boot recorded' : status.lastBootFailed ? 'failed' : 'ok'}\n`)
+  if (latest !== undefined) {
+    process.stdout.write(`latest: ${describe(latest, lastActivated(generations)?.id)}\n`)
+  }
+}
+
+/** Print the effective settings, one `key: value` pair per line. */
+function printSettings(settings: TimemachineSettings): void {
+  process.stdout.write(`autoSave: ${settings.autoSave}\n`)
+  process.stdout.write(`debounceMs: ${settings.debounceMs}\n`)
+  process.stdout.write(`retention: ${settings.retention}\n`)
+  process.stdout.write(`shortcuts.undo: ${settings.shortcuts.undo}\n`)
+  process.stdout.write(`shortcuts.redo: ${settings.shortcuts.redo}\n`)
 }
 
 /**
- * Recompose the profile as it now stands on disk, through the same layers a
- * boot would stack.
- * @param profile - the profile name.
- * @returns the composition's digest and the bundle versions it resolved.
+ * Parse one `--set key=value` pair into a settings patch. Every pair is
+ * validated BEFORE any write, so a bad pair leaves the settings file
+ * untouched.
+ * @param pair - the raw `key=value` text.
+ * @returns the patch fragment.
+ * @throws naming the pair when the key is unknown or the value invalid.
  */
-function recompose(profile: string): { digest: string; bundles: BundleStamp[] } {
-  const loaded = prepareProfile(profile)
-  return { digest: digestText(renderDurableComposition(loaded)), bundles: readBundleStamps(loaded) }
+function parseSettingPair(pair: string): TimemachineSettingsPatch {
+  const boundary = pair.indexOf('=')
+  const key = boundary < 0 ? pair : pair.slice(0, boundary)
+  const value = boundary < 0 ? '' : pair.slice(boundary + 1)
+  const invalid = `${NAME}: invalid --set ${JSON.stringify(pair)}`
+  switch (key) {
+    case 'autoSave':
+      if (value === 'true') return { autoSave: true }
+      if (value === 'false') return { autoSave: false }
+      throw new Error(`${invalid}: autoSave is 'true' or 'false'`)
+    case 'debounceMs':
+    case 'retention': {
+      const number = Number(value)
+      if (!Number.isInteger(number) || number <= 0) {
+        throw new Error(`${invalid}: ${key} is a positive integer`)
+      }
+      return key === 'debounceMs' ? { debounceMs: number } : { retention: number }
+    }
+    case 'shortcuts.undo':
+      if (value.length === 0) throw new Error(`${invalid}: shortcuts.undo is a non-empty string`)
+      return { shortcuts: { undo: value } }
+    case 'shortcuts.redo':
+      if (value.length === 0) throw new Error(`${invalid}: shortcuts.redo is a non-empty string`)
+      return { shortcuts: { redo: value } }
+    default:
+      throw new Error(`${invalid}: known keys are autoSave, debounceMs, retention, shortcuts.undo, shortcuts.redo`)
+  }
 }
 
-/**
- * Write one configuration's inputs back, then confirm they still compose the
- * tree they were recorded with — and put the profile back as it was when they do
- * not.
- *
- * The check has to run against written files rather than the recorded texts,
- * because reproducing a composition means resolving the bundle packages the
- * manifest names against the current installation. Restoring first and undoing
- * on a mismatch reuses the one composition path a boot uses, instead of a
- * parallel one that could disagree with it.
- * @param loaded - the profile as the current installation resolves it.
- * @param generation - the configuration to return to.
- */
-async function runRestore(loaded: Profile, generation: ConfigGeneration): Promise<void> {
-  const targets = restoreTargets(loaded, generation)
-  const previous: InputSnapshot[] = targets.map(target => ({
-    path: target.path,
-    text: existsSync(target.path) ? readFileSync(target.path, 'utf8') : null,
-  }))
-  const changes = []
-  for (const target of targets) changes.push(await restoreInput(target.path, target.text))
-  let verdict
-  try {
-    verdict = compareForRestore(generation, recompose(loaded.name))
-  } catch (error) {
-    // A recorded bundle the installation can no longer resolve fails inside
-    // `loadProfile`, which is drift the digest never gets a chance to see.
-    for (const entry of previous) await restoreInput(entry.path, entry.text)
-    throw new Error(
-      `${NAME}: configuration ${generation.id} no longer composes: `
-      + `${error instanceof Error ? error.message : String(error)}\n`
-      + `${NAME}: the profile is unchanged.`,
-    )
+/** Fold the `--set` pairs into one patch (shortcuts merge per key). */
+function mergeSettingPairs(pairs: readonly string[]): TimemachineSettingsPatch {
+  const patch: TimemachineSettingsPatch = {}
+  for (const pair of pairs) {
+    const fragment = parseSettingPair(pair)
+    patch.autoSave = fragment.autoSave ?? patch.autoSave
+    patch.debounceMs = fragment.debounceMs ?? patch.debounceMs
+    patch.retention = fragment.retention ?? patch.retention
+    if (fragment.shortcuts !== undefined) {
+      patch.shortcuts = { ...patch.shortcuts, ...fragment.shortcuts }
+    }
   }
-  if (!verdict.reproducible) {
-    for (const entry of previous) await restoreInput(entry.path, entry.text)
-    const lines = verdict.drift.map(drift =>
-      `  ${drift.name}: recorded ${drift.recorded ?? 'absent'}, installed ${drift.current ?? 'absent'}`)
-    throw new Error(
-      `${NAME}: configuration ${generation.id} can no longer be reproduced, so restoring it would compose a different tree.\n`
-      + (lines.length > 0
-        ? `${NAME}: these bundles moved:\n${lines.join('\n')}\n`
-        : `${NAME}: its inputs now compose a different tree with the same bundles.\n`)
-      + `${NAME}: the profile is unchanged. Inspect what was recorded with `
-      + `'${NAME} show --profile ${loaded.name} ${generation.id}'.`,
-    )
-  }
-  for (const change of changes) process.stdout.write(`${NAME}: ${change}\n`)
-  process.stdout.write(`${NAME}: profile ${loaded.name} is back at configuration ${generation.id}.\n`)
+  return patch
+}
+
+/** The default export filename: local time, sortable, spaces free. */
+function defaultExportName(now: Date): string {
+  const pad = (value: number): string => String(value).padStart(2, '0')
+  const stamp = `${now.getFullYear()}${pad(now.getMonth() + 1)}${pad(now.getDate())}`
+    + `-${pad(now.getHours())}${pad(now.getMinutes())}${pad(now.getSeconds())}`
+  return `${NAME}-${stamp}.zip`
 }
 
 const USAGE = `usage: ${NAME} <action> --profile <name>
@@ -201,25 +228,41 @@ const USAGE = `usage: ${NAME} <action> --profile <name>
   show <id>               print one configuration's composition
   diff <id> [id]          compare two compositions (default: against the latest)
   restore <id>            write one configuration's input files back
+  undo                    step back to the previous configuration
+  redo                    step forward to the configuration an undo stepped away from
+  snapshot [reason]       record the configuration as it now stands
+  remove <id>             delete one record (the last known-good one is protected)
+  status                  undo/redo availability, boot health, latest configuration
+  export [out.zip]        zip the whole history (default: ${NAME}-<YYYYMMDD-HHmmss>.zip)
+  import <zip>            unzip an archive into the history, never overwriting
+  prune                   apply the retention bound now
+  settings [--set k=v]    print the settings; --set updates autoSave, debounceMs,
+                          retention, shortcuts.undo, shortcuts.redo (repeatable)
+  gui                     serve the rescue page on 127.0.0.1 and open a browser
 `
 
-/** The parsed invocation: one verb, its ids, and the profile it acts on. */
-interface Invocation {
-  action: 'log' | 'show' | 'diff' | 'restore'
-  profile: string
-  id?: string
-  against?: string
-}
+/** The parsed invocation: one verb, its arguments, and the profile it acts on. */
+export type Invocation =
+  | { action: 'log', profile: string }
+  | { action: 'show' | 'restore' | 'remove', profile: string, id: string }
+  | { action: 'diff', profile: string, id: string, against?: string }
+  | { action: 'undo' | 'redo' | 'status' | 'prune' | 'gui', profile: string }
+  | { action: 'snapshot', profile: string, reason?: string }
+  | { action: 'export', profile: string, out?: string }
+  | { action: 'import', profile: string, zip: string }
+  | { action: 'settings', profile: string, sets: string[] }
+  | { action: 'help' }
 
 /**
  * Parse argv into an invocation. Hand-rolled on purpose: the CLI stands alone
  * in a profile's dependency tree and pulls in no argument parser.
  * @param argv - process arguments after the node/script pair.
  * @returns the invocation.
- * @throws a usage line when the verb set, `--profile`, or the id counts do not parse.
+ * @throws a usage line when the verb set, `--profile`, or the argument counts do not parse.
  */
 export function parseArgs(argv: readonly string[]): Invocation {
   let profile: string | undefined
+  const sets: string[] = []
   const positional: string[] = []
   for (let index = 0; index < argv.length; index += 1) {
     const arg = argv[index]
@@ -227,20 +270,63 @@ export function parseArgs(argv: readonly string[]): Invocation {
       profile = argv[index + 1]
       if (profile === undefined) throw new Error(`${NAME}: --profile needs a profile name`)
       index += 1
+    } else if (arg === '--set') {
+      const pair = argv[index + 1]
+      if (pair === undefined) throw new Error(`${NAME}: --set needs a key=value pair`)
+      sets.push(pair)
+      index += 1
+    } else if (arg === '-h' || arg === '--help') {
+      return { action: 'help' }
     } else if (arg !== undefined && arg.startsWith('--')) {
       throw new Error(`${NAME}: unknown flag ${JSON.stringify(arg)}`)
     } else if (arg !== undefined) {
       positional.push(arg)
     }
   }
-  const [action, id, against, ...rest] = positional
-  if (profile === undefined) throw new Error(`${NAME}: --profile <name> is required`)
-  if (action === 'log' && id === undefined) return { action, profile }
-  if ((action === 'show' || action === 'restore') && id !== undefined && against === undefined) {
-    return { action, profile, id }
+  const [action, first, second, ...rest] = positional
+  if (sets.length > 0 && action !== 'settings') {
+    throw new Error(`${NAME}: --set only goes with the settings action\n${USAGE}`)
   }
-  if (action === 'diff' && id !== undefined && rest.length === 0) {
-    return against === undefined ? { action, profile, id } : { action, profile, id, against }
+  if (action === undefined) throw new Error(`${NAME}: an action is required\n${USAGE}`)
+  if (profile === undefined) throw new Error(`${NAME}: --profile <name> is required`)
+  const name = profile
+  switch (action) {
+    case 'log':
+    case 'undo':
+    case 'redo':
+    case 'status':
+    case 'prune':
+    case 'gui':
+      if (first === undefined) return { action, profile: name }
+      break
+    case 'show':
+    case 'restore':
+    case 'remove':
+      if (first !== undefined && second === undefined) return { action, profile: name, id: first }
+      break
+    case 'diff':
+      if (first !== undefined && rest.length === 0) {
+        return second === undefined
+          ? { action, profile: name, id: first }
+          : { action, profile: name, id: first, against: second }
+      }
+      break
+    case 'snapshot':
+      if (second === undefined) {
+        return { action, profile: name, ...first === undefined ? {} : { reason: first } }
+      }
+      break
+    case 'export':
+      if (second === undefined) {
+        return { action, profile: name, ...first === undefined ? {} : { out: first } }
+      }
+      break
+    case 'import':
+      if (first !== undefined && second === undefined) return { action, profile: name, zip: first }
+      break
+    case 'settings':
+      if (first === undefined) return { action, profile: name, sets }
+      break
   }
   throw new Error(`${NAME}: unknown action or wrong argument count\n${USAGE}`)
 }
@@ -251,10 +337,13 @@ export function parseArgs(argv: readonly string[]): Invocation {
  * @returns the process exit code once the verb settles.
  */
 export async function run(invocation: Invocation): Promise<number> {
-  healProfilesModuleFallback(INSTALL_ANCHOR)
-  const loaded = prepareProfile(invocation.profile)
+  if (invocation.action === 'help') {
+    process.stdout.write(USAGE)
+    return 0
+  }
   try {
-    const { generations, unreadable } = readGenerations(loaded.dir)
+    const host = openProfile(invocation.profile)
+    const { generations, unreadable } = readGenerations(host.profileDir)
     // Named on every verb, not just `log`: a restore that silently skipped the
     // record a person is looking for would be the worst place to stay quiet.
     for (const entry of unreadable) {
@@ -265,7 +354,7 @@ export async function run(invocation: Invocation): Promise<number> {
         runLog(generations, invocation.profile)
         return 0
       case 'show':
-        runShow(selectGeneration(generations, invocation.id as string))
+        runShow(selectGeneration(generations, invocation.id))
         return 0
       case 'diff': {
         // A bare id compares that configuration against the most recent one,
@@ -276,12 +365,73 @@ export async function run(invocation: Invocation): Promise<number> {
         if (right === undefined) {
           throw new Error(`${NAME}: profile ${invocation.profile} has recorded no configuration to compare against`)
         }
-        runDiff(selectGeneration(generations, invocation.id as string), right)
+        runDiff(selectGeneration(generations, invocation.id), right)
         return 0
       }
       case 'restore':
-        await runRestore(loaded, selectGeneration(generations, invocation.id as string))
+        return reportRestore(
+          await restoreGeneration(host, selectGeneration(generations, invocation.id)),
+          'is back at',
+          invocation.profile,
+        )
+      case 'undo':
+        return reportStep(await undoStandalone(host, new Date().toISOString()), 'undo', invocation.profile)
+      case 'redo':
+        return reportStep(await redoStandalone(host), 'redo', invocation.profile)
+      case 'snapshot': {
+        const generation = await snapshotStandalone(host, invocation.reason, new Date().toISOString())
+        process.stdout.write(`${NAME}: recorded configuration ${generation.id}`
+          + `${generation.reason === undefined ? '' : ` (${generation.reason})`}.\n`)
         return 0
+      }
+      case 'remove': {
+        const generation = selectGeneration(generations, invocation.id)
+        const result = removeStandalone(host, generation.id)
+        if (!result.removed) {
+          process.stderr.write(`${NAME}: ${result.refusal ?? 'remove refused'}\n`)
+          return 1
+        }
+        process.stdout.write(`${NAME}: removed configuration ${generation.id}.\n`)
+        return 0
+      }
+      case 'status':
+        runStatus(host, generations)
+        return 0
+      case 'export': {
+        const out = invocation.out ?? defaultExportName(new Date())
+        const bytes = exportGenerations(host.profileDir)
+        writeFileSync(out, bytes)
+        process.stdout.write(`${NAME}: wrote ${out} (${generations.length} configuration`
+          + `${generations.length === 1 ? '' : 's'}).\n`)
+        return 0
+      }
+      case 'import': {
+        const result = await importGenerations(host.profileDir, readFileSync(invocation.zip))
+        process.stdout.write(`${NAME}: imported ${result.imported.length}, skipped ${result.skipped.length}`
+          + `${result.skipped.length === 0 ? '' : ` (${result.skipped.join(', ')})`}.\n`)
+        return 0
+      }
+      case 'prune': {
+        const removed = pruneStandalone(host)
+        if (removed.length === 0) {
+          process.stdout.write(`${NAME}: nothing to prune.\n`)
+        } else {
+          for (const id of removed) process.stdout.write(`${NAME}: pruned configuration ${id}.\n`)
+        }
+        return 0
+      }
+      case 'settings': {
+        if (invocation.sets.length > 0) {
+          printSettings(await writeTimemachineSettings(host.profileDir, mergeSettingPairs(invocation.sets)))
+        } else {
+          printSettings(readTimemachineSettings(host.profileDir))
+        }
+        return 0
+      }
+      case 'gui': {
+        const { runGui } = await import('./gui.ts')
+        return await runGui(host)
+      }
     }
   } catch (error) {
     // The library's own diagnostics carry no bin prefix, so one is added here.

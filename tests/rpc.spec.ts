@@ -230,3 +230,185 @@ describe('boot record directory', () => {
     expect(readdirSync(join(profileDir, 'timemachine'))).toEqual([`${bootedId}.json`])
   })
 })
+
+describe('extended endpoints', () => {
+  it('takes a manual snapshot with its reason', async () => {
+    const { captured, service } = await bench()
+    await awaitBootRecord(service)
+    // The boot already recorded the current inputs, so a snapshot must name a
+    // changed configuration to create a record of its own (adoption keeps the
+    // creating origin — a boot re-observation must not demote a snapshot, and
+    // the reverse keeps this test honest).
+    writeFileSync(join(profileDir, 'cordis.patch.yml'), '- id: snapshotted\n')
+    const result = await captured.handler('snapshot', { reason: 'before the panel' }, SIGNAL)
+    expect(result.ok).toBe(true)
+    if (!result.ok) return
+    const value = result.value as { id: string, origin: string, reason: string }
+    expect(value.origin).toBe('manual')
+    expect(value.reason).toBe('before the panel')
+    const invalid = await captured.handler('snapshot', { reason: 3 }, SIGNAL)
+    expect(invalid).toEqual({ ok: false, error: expect.objectContaining({ code: 'bad-request' }) })
+  })
+
+  it('undoes and redoes a configuration change, emptiness riding the ok branch', async () => {
+    const { captured, service } = await bench()
+    await awaitBootRecord(service)
+    // One snapshot of the current state, then a change and another snapshot.
+    await captured.handler('snapshot', {}, SIGNAL)
+    writeFileSync(join(profileDir, 'cordis.patch.yml'), '- id: changed\n')
+    await captured.handler('snapshot', {}, SIGNAL)
+
+    const undo = await captured.handler('undo', {}, SIGNAL)
+    expect(undo.ok).toBe(true)
+    if (!undo.ok) return
+    expect((undo.value as { changed: boolean }).changed).toBe(true)
+    expect(readFileSync(join(profileDir, 'cordis.patch.yml'), 'utf8')).toBe(PATCH)
+
+    const redo = await captured.handler('redo', {}, SIGNAL)
+    expect(redo.ok).toBe(true)
+    if (!redo.ok) return
+    expect((redo.value as { changed: boolean }).changed).toBe(true)
+    expect(readFileSync(join(profileDir, 'cordis.patch.yml'), 'utf8')).toBe('- id: changed\n')
+
+    const again = await captured.handler('redo', {}, SIGNAL)
+    expect(again.ok).toBe(true)
+    if (again.ok) expect(again.value).toEqual({ changed: false, empty: 'nothing-to-redo' })
+  })
+
+  it('removes a generation and protects the booted one', async () => {
+    const { captured, service } = await bench()
+    const bootedId = await awaitBootRecord(service)
+    writeFileSync(join(profileDir, 'cordis.patch.yml'), '- id: other\n')
+    await captured.handler('snapshot', {}, SIGNAL)
+    const plain = service.list().generations.find(generation => generation.id !== bootedId)!
+
+    const removed = await captured.handler('remove', { id: plain.id }, SIGNAL)
+    expect(removed.ok).toBe(true)
+    if (removed.ok) expect(removed.value).toEqual({ removed: true })
+
+    const refused = await captured.handler('remove', { id: bootedId }, SIGNAL)
+    expect(refused.ok).toBe(true)
+    if (!refused.ok) return
+    const value = refused.value as { removed: boolean, refusal?: string }
+    expect(value.removed).toBe(false)
+    expect(value.refusal).toContain('what this process booted')
+
+    const missing = await captured.handler('remove', { id: 'ffffffffffff' }, SIGNAL)
+    expect(missing).toEqual({ ok: false, error: expect.objectContaining({ code: 'timemachine-not-found' }) })
+  })
+
+  it('diffs a generation against another or the live state', async () => {
+    const { captured, service } = await bench()
+    const bootedId = await awaitBootRecord(service)
+    writeFileSync(join(profileDir, 'cordis.patch.yml'), '- id: changed\n')
+    await captured.handler('snapshot', {}, SIGNAL)
+    const other = service.list().generations.find(generation => generation.id !== bootedId)!
+
+    const pair = await captured.handler('diff', { id: bootedId, otherId: other.id }, SIGNAL)
+    expect(pair.ok).toBe(true)
+    if (!pair.ok) return
+    const hunks = (pair.value as { file: string }[]).map(diff => diff.file)
+    expect(hunks).toContain('profilePatch')
+
+    const live = await captured.handler('diff', { id: bootedId }, SIGNAL)
+    expect(live.ok).toBe(true)
+    const invalid = await captured.handler('diff', {}, SIGNAL)
+    expect(invalid).toEqual({ ok: false, error: expect.objectContaining({ code: 'bad-request' }) })
+  })
+
+  it('round-trips an export through import, and rejects a corrupt archive', async () => {
+    const { captured, service } = await bench()
+    const bootedId = await awaitBootRecord(service)
+    const exported = await captured.handler('export', {}, SIGNAL)
+    expect(exported.ok).toBe(true)
+    if (!exported.ok) return
+    const data = (exported.value as { data: string }).data
+    // base64 decodes to a zip (PK magic), holding the boot record.
+    const bytes = Buffer.from(data, 'base64')
+    expect(bytes.subarray(0, 2).toString('latin1')).toBe('PK')
+
+    // Importing into the same profile skips every record it already holds.
+    const imported = await captured.handler('import', { data }, SIGNAL)
+    expect(imported.ok).toBe(true)
+    if (!imported.ok) return
+    expect((imported.value as { skipped: string[] }).skipped).toEqual([bootedId])
+
+    const garbage = await captured.handler('import', { data: Buffer.from('not a zip').toString('base64') }, SIGNAL)
+    expect(garbage).toEqual({ ok: false, error: expect.objectContaining({ code: 'bad-request' }) })
+    const empty = await captured.handler('import', {}, SIGNAL)
+    expect(empty).toEqual({ ok: false, error: expect.objectContaining({ code: 'bad-request' }) })
+  })
+
+  it('answers status and settings', async () => {
+    const { captured, service } = await bench()
+    await awaitBootRecord(service)
+    const status = await captured.handler('status', {}, SIGNAL)
+    expect(status.ok).toBe(true)
+    if (!status.ok) return
+    expect(status.value).toMatchObject({ canUndo: false, canRedo: false, total: 1, lastBootFailed: false })
+
+    const settings = await captured.handler('getSettings', {}, SIGNAL)
+    expect(settings.ok).toBe(true)
+    if (!settings.ok) return
+    expect(settings.value).toEqual({
+      autoSave: true, debounceMs: 1500, retention: 50,
+      shortcuts: { undo: 'Ctrl+Alt+Z', redo: 'Ctrl+Alt+Y' },
+    })
+
+    const updated = await captured.handler('updateSettings', { patch: { retention: 5 } }, SIGNAL)
+    expect(updated.ok).toBe(true)
+    if (!updated.ok) return
+    expect((updated.value as { retention: number }).retention).toBe(5)
+    expect(service.getSettings().retention).toBe(5)
+
+    for (const payload of [{ patch: { retention: -1 } }, { patch: { autoSave: 'yes' } }, {}]) {
+      const invalid = await captured.handler('updateSettings', payload, SIGNAL)
+      expect(invalid).toEqual({ ok: false, error: expect.objectContaining({ code: 'bad-request' }) })
+    }
+  })
+
+  it('prunes the boot/auto records beyond the retention bound on demand', async () => {
+    const { captured, service } = await bench()
+    const bootedId = await awaitBootRecord(service)
+    // Two more boot records, backdated so they are the oldest; a manual
+    // snapshot over changed inputs is never reaped by housekeeping.
+    const extra: string[] = []
+    for (let attempt = 0; attempt < 2; attempt += 1) {
+      const generation = await recordGeneration({
+        profileDir,
+        profile: 'demo',
+        inputs: { manifest: `{"n":${attempt}}`, profilePatch: PATCH, homePatch: null },
+        bundles: [],
+        render: '- id: x\n',
+        now: new Date(2026, 7, 14, 1, 0, attempt).toISOString(),
+      })
+      extra.push(generation.id)
+    }
+    writeFileSync(join(profileDir, 'cordis.patch.yml'), '- id: manual\n')
+    await captured.handler('snapshot', { reason: 'keep me' }, SIGNAL)
+    await captured.handler('updateSettings', { patch: { retention: 1 } }, SIGNAL)
+
+    const pruned = await captured.handler('prune', {}, SIGNAL)
+    expect(pruned.ok).toBe(true)
+    if (!pruned.ok) return
+    // Three boot-origin records against a bound of 1: the two oldest go; the
+    // booted one settled `activated` and the manual snapshot is out of scope.
+    expect((pruned.value as { removed: string[] }).removed).toEqual(extra)
+    const remaining = service.list().generations.map(generation => generation.id)
+    expect(remaining).toHaveLength(2)
+    expect(remaining).toContain(bootedId)
+  })
+
+  it('answers timemachine-absent on every new endpoint without a profile', async () => {
+    const { captured } = await bench({ withProfile: false })
+    const payloads: Record<string, unknown> = {
+      snapshot: {}, undo: {}, redo: {}, remove: { id: 'x' }, diff: { id: 'x' },
+      export: {}, import: { data: 'e30=' }, status: {}, getSettings: {}, updateSettings: { patch: {} },
+      prune: {},
+    }
+    for (const [endpoint, payload] of Object.entries(payloads)) {
+      const result = await captured.handler(endpoint, payload, SIGNAL)
+      expect(result, endpoint).toEqual({ ok: false, error: expect.objectContaining({ code: 'timemachine-absent' }) })
+    }
+  })
+})

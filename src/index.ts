@@ -13,19 +13,33 @@
 import type { Context } from '@deepseek-ai/cordis'
 import type { ConnectionRpcHandler } from '@deepseek-ai/dsh-client-connection'
 import TimeMachine from './service.ts'
-import { lastActivated, latestStatus } from './generations.ts'
+import { generationOrigin, lastActivated, latestStatus } from './generations.ts'
 import {
   TIMEMACHINE_CHANNEL,
   type TimeMachineErrorCode,
   type TimeMachineRpcResult,
   type GenerationSummary,
 } from './rpc.ts'
-import { idRequestSchema, listRequestSchema } from './rpc-schemas.ts'
+import {
+  diffRequestSchema,
+  emptyRequestSchema,
+  idRequestSchema,
+  importRequestSchema,
+  listRequestSchema,
+  snapshotRequestSchema,
+  updateSettingsRequestSchema,
+} from './rpc-schemas.ts'
+import { registerTimemachineTools } from './tools.ts'
 import type { ConfigGeneration } from './types.ts'
 
 export type * from './types.ts'
 export * from './generations.ts'
 export * from './rpc.ts'
+export * from './settings.ts'
+export * from './undo.ts'
+export * from './diff.ts'
+export * from './archive.ts'
+export * from './watch.ts'
 export { TimeMachine }
 
 /** Cordis plugin name. */
@@ -65,6 +79,8 @@ function generationSummary(
   return {
     id: generation.id,
     scope: generation.scope,
+    origin: generationOrigin(generation),
+    ...generation.reason === undefined ? {} : { reason: generation.reason },
     recordedAt: generation.recordedAt,
     lastSeenAt: generation.lastSeenAt,
     ...status === undefined ? {} : { latestStatus: status },
@@ -164,6 +180,125 @@ function createHandler(ctx: Context): ChannelHandler {
           return readError(parsed.data.id, error)
         }
       }
+      case 'snapshot': {
+        const parsed = snapshotRequestSchema.safeParse(payload)
+        if (!parsed.success) {
+          return rpcError('bad-request', `invalid snapshot payload: ${parsed.error.message}`, { issues: parsed.error.issues })
+        }
+        const mounted = service()
+        if (mounted === undefined) return absent()
+        return { ok: true, value: await mounted.snapshot(parsed.data.reason, new Date().toISOString()) }
+      }
+      case 'undo':
+      case 'redo': {
+        const parsed = emptyRequestSchema.safeParse(payload)
+        if (!parsed.success) {
+          return rpcError('bad-request', `invalid ${endpoint} payload: ${parsed.error.message}`, { issues: parsed.error.issues })
+        }
+        const mounted = service()
+        if (mounted === undefined) return absent()
+        return {
+          ok: true,
+          value: endpoint === 'undo'
+            ? await mounted.undo(new Date().toISOString())
+            : await mounted.redo(),
+        }
+      }
+      case 'remove': {
+        const parsed = idRequestSchema.safeParse(payload)
+        if (!parsed.success) {
+          return rpcError('bad-request', `invalid remove payload: ${parsed.error.message}`, { issues: parsed.error.issues })
+        }
+        const mounted = service()
+        if (mounted === undefined) return absent()
+        try {
+          return { ok: true, value: mounted.remove(parsed.data.id) }
+        } catch (error: unknown) {
+          return readError(parsed.data.id, error)
+        }
+      }
+      case 'diff': {
+        const parsed = diffRequestSchema.safeParse(payload)
+        if (!parsed.success) {
+          return rpcError('bad-request', `invalid diff payload: ${parsed.error.message}`, { issues: parsed.error.issues })
+        }
+        const mounted = service()
+        if (mounted === undefined) return absent()
+        try {
+          return { ok: true, value: mounted.diff(parsed.data.id, parsed.data.otherId) }
+        } catch (error: unknown) {
+          return readError(parsed.data.id, error)
+        }
+      }
+      case 'export': {
+        const parsed = emptyRequestSchema.safeParse(payload)
+        if (!parsed.success) {
+          return rpcError('bad-request', `invalid export payload: ${parsed.error.message}`, { issues: parsed.error.issues })
+        }
+        const mounted = service()
+        if (mounted === undefined) return absent()
+        const archive = mounted.exportData()
+        if (archive === undefined) return absent()
+        return { ok: true, value: { data: Buffer.from(archive).toString('base64') } }
+      }
+      case 'import': {
+        const parsed = importRequestSchema.safeParse(payload)
+        if (!parsed.success) {
+          return rpcError('bad-request', `invalid import payload: ${parsed.error.message}`, { issues: parsed.error.issues })
+        }
+        const mounted = service()
+        if (mounted === undefined) return absent()
+        let bytes: Uint8Array
+        try {
+          bytes = Buffer.from(parsed.data.data, 'base64')
+        } catch {
+          return rpcError('bad-request', 'invalid import payload: data is not base64', { issues: [] })
+        }
+        try {
+          return { ok: true, value: await mounted.importData(bytes) }
+        } catch (error: unknown) {
+          // A corrupt archive throws out of unzip; that is a bad payload, not a fault.
+          return rpcError('bad-request', `invalid import payload: ${error instanceof Error ? error.message : String(error)}`, { issues: [] })
+        }
+      }
+      case 'status': {
+        const parsed = emptyRequestSchema.safeParse(payload)
+        if (!parsed.success) {
+          return rpcError('bad-request', `invalid status payload: ${parsed.error.message}`, { issues: parsed.error.issues })
+        }
+        const mounted = service()
+        if (mounted === undefined) return absent()
+        return { ok: true, value: mounted.status() }
+      }
+      case 'prune': {
+        const parsed = emptyRequestSchema.safeParse(payload)
+        if (!parsed.success) {
+          return rpcError('bad-request', `invalid prune payload: ${parsed.error.message}`, { issues: parsed.error.issues })
+        }
+        const mounted = service()
+        if (mounted === undefined) return absent()
+        const removed = mounted.prune()
+        if (removed === undefined) return absent()
+        return { ok: true, value: { removed } }
+      }
+      case 'getSettings': {
+        const parsed = emptyRequestSchema.safeParse(payload)
+        if (!parsed.success) {
+          return rpcError('bad-request', `invalid getSettings payload: ${parsed.error.message}`, { issues: parsed.error.issues })
+        }
+        const mounted = service()
+        if (mounted === undefined) return absent()
+        return { ok: true, value: mounted.getSettings() }
+      }
+      case 'updateSettings': {
+        const parsed = updateSettingsRequestSchema.safeParse(payload)
+        if (!parsed.success) {
+          return rpcError('bad-request', `invalid updateSettings payload: ${parsed.error.message}`, { issues: parsed.error.issues })
+        }
+        const mounted = service()
+        if (mounted === undefined) return absent()
+        return { ok: true, value: await mounted.updateSettings(parsed.data.patch) }
+      }
       default:
         return rpcError('bad-request', `unknown endpoint ${JSON.stringify(endpoint)}`, { issues: [] })
     }
@@ -172,8 +307,10 @@ function createHandler(ctx: Context): ChannelHandler {
 
 /**
  * Plugin body: mount the history service, expose it over the loopback-pinned
- * RPC channel, and record this boot (best-effort — an unwritable history is a
- * lost recovery aid, not a reason to fail a boot that would otherwise work).
+ * RPC channel, record this boot (best-effort — an unwritable history is a lost
+ * recovery aid, not a reason to fail a boot that would otherwise work), arm
+ * the auto-save watcher, and offer the agent tools when a tool registry is
+ * composed (a headless tree without one simply has no tools).
  * @param ctx - plugin context carrying the Connection host service.
  */
 export function apply(ctx: Context): void {
@@ -192,5 +329,14 @@ export function apply(ctx: Context): void {
     void inner.timemachine.recordBoot(new Date().toISOString()).catch((error: unknown) => {
       process.stderr.write(`dsh-timemachine: warning: could not record this configuration: ${String(error)}\n`)
     })
+    inner.timemachine.startAutoSave()
+    // The inject callback is a child plugin: its fiber disposes with this one,
+    // which is the watcher's stop hook.
+    inner.effect(() => () => inner.timemachine.stopAutoSave(), 'timemachine auto-save')
+  })
+  // The tool registry is optional in the composition: `ctx.inject` defers
+  // until it mounts, and a tree that never mounts one never gets the tools.
+  ctx.inject(['tools'], (inner) => {
+    registerTimemachineTools(inner)
   })
 }

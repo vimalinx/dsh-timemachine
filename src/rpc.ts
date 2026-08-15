@@ -16,17 +16,28 @@
 
 import type {
   ConfigGeneration,
+  GenerationOrigin,
   GenerationScope,
   OutcomeStatus,
   RestoreResult,
+  StackRestoreResult,
+  TimemachineSettings,
+  TimemachineSettingsPatch,
+  TimemachineStatus,
   UnreadableGeneration,
 } from './types.ts'
+import type { ImportResult } from './archive.ts'
+import type { InputDiff } from './diff.ts'
 
 /** The logical Connection channel this plugin registers and calls. */
 export const TIMEMACHINE_CHANNEL = '/timemachine'
 
 /** Channel endpoints, named as channel-relative paths. */
-export const TIMEMACHINE_ENDPOINTS = ['list', 'read', 'restore'] as const
+export const TIMEMACHINE_ENDPOINTS = [
+  'list', 'read', 'restore',
+  'snapshot', 'undo', 'redo', 'remove', 'diff',
+  'export', 'import', 'status', 'getSettings', 'updateSettings', 'prune',
+] as const
 
 /** One channel endpoint. */
 export type TimeMachineEndpoint = (typeof TIMEMACHINE_ENDPOINTS)[number]
@@ -41,6 +52,10 @@ export interface GenerationSummary {
   id: string
   /** Which slots the record observed (`composition` or `full`). */
   scope: GenerationScope
+  /** How the record came to be (pre-origin records read as `boot`). */
+  origin: GenerationOrigin
+  /** The note a manual snapshot was taken with. */
+  reason?: string
   /** ISO timestamp this configuration was first observed. */
   recordedAt: string
   /** ISO timestamp this configuration was most recently composed. */
@@ -84,6 +99,83 @@ export type TimeMachineReadResponse = ConfigGeneration
  * `timemachine-ambiguous`.
  */
 export type TimeMachineRestoreResponse = RestoreResult
+
+/** `snapshot` request payload: an optional note to record with the snapshot. */
+export interface TimeMachineSnapshotRequest {
+  reason?: string
+}
+
+/** `snapshot` response: the stored (or adopted) record. */
+export type TimeMachineSnapshotResponse = ConfigGeneration
+
+/**
+ * `undo`/`redo` response (no request payload). An empty stack rides the ok
+ * branch as `changed: false` with `empty` naming the direction — it is a
+ * normal business answer, like a restore refusal.
+ */
+export type TimeMachineStackResponse = StackRestoreResult
+
+/** `remove` request payload: a generation id or unambiguous prefix. */
+export type TimeMachineRemoveRequest = TimeMachineIdRequest
+
+/** `remove` response: whether the record was deleted, or the refusal's reason. */
+export interface TimeMachineRemoveResponse {
+  removed: boolean
+  refusal?: string
+}
+
+/**
+ * `diff` request payload: one generation against another (`otherId`), or
+ * against the live inputs and render when `otherId` is omitted.
+ */
+export interface TimeMachineDiffRequest {
+  id: string
+  otherId?: string
+}
+
+/** `diff` response: one entry per differing file; empty when identical. */
+export type TimeMachineDiffResponse = InputDiff[]
+
+/**
+ * `export` response (no request payload): the zip archive as base64. The
+ * archive is kilobytes (dozens of small JSON records), so base64's 4/3
+ * overhead buys a clean JSON wire at no real cost — binary framing would.
+ */
+export interface TimeMachineExportResponse {
+  data: string
+}
+
+/** `import` request payload: the base64 archive `export` produced. */
+export interface TimeMachineImportRequest {
+  data: string
+}
+
+/** `import` response: which generation ids landed and which were skipped. */
+export type TimeMachineImportResponse = ImportResult
+
+/** `status` response (no request payload): one poll's worth of panel state. */
+export type TimeMachineStatusResponse = TimemachineStatus
+
+/**
+ * `prune` response (no request payload): the ids of the records the retention
+ * bound just removed (its count is `removed.length`). Only `boot`/`auto`
+ * generations are ever reaped — manual snapshots, regret records, and the
+ * last known-good configuration survive housekeeping.
+ */
+export interface TimeMachinePruneResponse {
+  removed: string[]
+}
+
+/** `getSettings` response (no request payload). */
+export type TimeMachineGetSettingsResponse = TimemachineSettings
+
+/** `updateSettings` request payload. */
+export interface TimeMachineUpdateSettingsRequest {
+  patch: TimemachineSettingsPatch
+}
+
+/** `updateSettings` response: the effective settings after the write. */
+export type TimeMachineUpdateSettingsResponse = TimemachineSettings
 
 /**
  * The channel's error vocabulary, mirroring the core ApiProxy domain's codes

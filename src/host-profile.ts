@@ -84,8 +84,10 @@ export function homePatchPath(home: string = resolveDshHome()): string {
 /**
  * Load a resolved profile and (re)write its empty root config (source:
  * profile-boot.ts `prepareProfile`, minus the fallback heal — the boot
- * already maintains `$DSH_HOME/profiles/node_modules`; only the standalone
- * CLI heals it, against this package's own anchor).
+ * already maintains `$DSH_HOME/profiles/node_modules`; the standalone CLI
+ * heals it only when this package's anchor lives outside the profiles tree,
+ * since healing from inside corrupts the boot's links — see standalone.ts
+ * `anchorOutsideProfiles`).
  * @param name - the profile name.
  * @param home - the Harness home; defaults to {@link resolveDshHome}.
  * @returns the loaded profile.
@@ -191,6 +193,7 @@ export function deriveProfileHost(baseUrl: string | undefined): ConfigGeneration
   return {
     profile,
     profileDir,
+    homeDir: home,
     // Settled by the service's own boot record, not known at derivation time.
     bootedId: undefined,
     readInputs: () => readGenerationInputs(prepared(), home),

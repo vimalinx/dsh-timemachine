@@ -33,6 +33,7 @@ import type {
   CurrentComposition,
   GenerationEnvironment,
   GenerationInputs,
+  GenerationOrigin,
   GenerationOutcome,
   GenerationScope,
   GenerationsRead,
@@ -54,9 +55,9 @@ export const GENERATION_FORMAT_VERSION = 2
 export const GENERATIONS_DIRNAME = 'timemachine'
 
 /**
- * How many generations one profile retains. The history answers "what did I
- * change recently", so it is bounded by count; the newest record carrying an
- * `activated` outcome is never pruned, because that is the one a recovery needs.
+ * The default for how many auto-cleanable generations one profile retains;
+ * the settings file's `retention` overrides it. The history answers "what did
+ * I change recently", so it is bounded by count — see `prune` for what counts.
  */
 export const GENERATION_RETENTION = 50
 
@@ -128,6 +129,14 @@ function validateGeneration(value: unknown): { generation: ConfigGeneration } | 
   if (record.scope !== 'composition' && record.scope !== 'full') {
     return { reason: '`scope` must be "composition" or "full"' }
   }
+  if (record.origin !== undefined
+    && record.origin !== 'boot' && record.origin !== 'auto'
+    && record.origin !== 'manual' && record.origin !== 'regret') {
+    return { reason: '`origin` must be "boot", "auto", "manual", or "regret"' }
+  }
+  if (record.reason !== undefined && typeof record.reason !== 'string') {
+    return { reason: '`reason` must be a string' }
+  }
   if (record.environment !== null && (typeof record.environment !== 'object' || Array.isArray(record.environment))) {
     return { reason: '`environment` must be a JSON object or null' }
   }
@@ -179,7 +188,7 @@ export function readGenerations(profileDir: string): GenerationsRead {
   const generations: ConfigGeneration[] = []
   const unreadable: UnreadableGeneration[] = []
   for (const name of names) {
-    if (!name.endsWith('.json')) continue
+    if (!name.endsWith('.json') || NON_RECORD_FILES.has(name)) continue
     const path = join(dir, name)
     let parsed: unknown
     try {
@@ -198,6 +207,16 @@ export function readGenerations(profileDir: string): GenerationsRead {
   return { generations, unreadable }
 }
 
+/**
+ * A record's origin with the pre-field default applied: records written before
+ * origins existed were all boot observations, so that is what they read as.
+ * @param generation - the record to read.
+ * @returns the effective origin.
+ */
+export function generationOrigin(generation: ConfigGeneration): GenerationOrigin {
+  return generation.origin ?? 'boot'
+}
+
 /** Write one record so a concurrent reader never sees a partial file. */
 async function writeGeneration(dir: string, generation: ConfigGeneration): Promise<void> {
   await writeFileAtomic(
@@ -208,23 +227,112 @@ async function writeGeneration(dir: string, generation: ConfigGeneration): Promi
 }
 
 /**
- * Drop the oldest records beyond {@link GENERATION_RETENTION}, keeping the
- * newest one that carries an `activated` outcome whatever its age — a recovery
- * needs the last known-good configuration, not the last N launches.
+ * Drop the oldest auto-cleanable records beyond the retention bound. Only
+ * `boot`/`auto` generations count against the bound and are ever removed: a
+ * `manual` snapshot and a `regret` record (an undo's way back) exist because
+ * someone asked for them, so housekeeping never reaps them. The newest record
+ * carrying an `activated` outcome is also never pruned, whatever its origin or
+ * age — a recovery needs the last known-good configuration, not the last N
+ * launches.
  */
-function prune(dir: string, generations: readonly ConfigGeneration[]): void {
-  if (generations.length <= GENERATION_RETENTION) return
+function prune(dir: string, generations: readonly ConfigGeneration[], retention: number): ConfigGeneration[] {
+  const cleanable = generations.filter((generation) => {
+    const origin = generationOrigin(generation)
+    return origin === 'boot' || origin === 'auto'
+  })
+  if (cleanable.length <= retention) return []
   const keepActivated = [...generations].reverse()
     .find(generation => generation.outcomes.some(outcome => outcome.status === 'activated'))
-  for (const generation of generations.slice(0, generations.length - GENERATION_RETENTION)) {
+  const removed: ConfigGeneration[] = []
+  for (const generation of cleanable.slice(0, cleanable.length - retention)) {
     if (generation.id === keepActivated?.id) continue
     try {
       unlinkSync(join(dir, `${generation.id}.json`))
+      removed.push(generation)
     } catch {
       // Retention is housekeeping: another process pruning the same record, or
       // a read-only history directory, must not fail the boot being recorded.
     }
   }
+  return removed
+}
+
+/**
+ * Prune a profile's history on demand, without recording anything (the CLI's
+ * `prune` verb and the rescue GUI; {@link recordGeneration} prunes as a side
+ * effect of recording).
+ * @param profileDir - the profile directory.
+ * @param retention - how many auto-cleanable generations to retain.
+ * @returns the removed generations' ids.
+ */
+export function pruneGenerations(profileDir: string, retention: number): string[] {
+  return prune(
+    resolveGenerationsDir(profileDir),
+    readGenerations(profileDir).generations,
+    retention,
+  ).map(generation => generation.id)
+}
+
+/** The filename of the redo stack inside the generations directory. */
+export const UNDO_STATE_FILENAME = 'undo-state.json'
+
+/** The filename of the plugin settings inside the generations directory. */
+export const SETTINGS_FILENAME = 'settings.json'
+
+/**
+ * Files the generations directory holds that are not generation records;
+ * {@link readGenerations} must not report the plugin's own state as corrupt.
+ */
+const NON_RECORD_FILES = new Set([UNDO_STATE_FILENAME, SETTINGS_FILENAME])
+
+/**
+ * The redo stack's on-disk shape: generation ids an undo stepped away from,
+ * oldest first, the next redo target last. The undo side needs no file — the
+ * generations themselves are the undo stack (`planUndo` walks them).
+ */
+export interface UndoState {
+  redo: string[]
+}
+
+/**
+ * Read the redo stack. A missing or damaged file reads as an empty stack: a
+ * lost redo future is a shrug, not an error worth surfacing at boot.
+ * @param profileDir - the profile directory.
+ * @returns the stored stack.
+ */
+export function readUndoState(profileDir: string): UndoState {
+  try {
+    const parsed: unknown = JSON.parse(
+      readFileSync(join(resolveGenerationsDir(profileDir), UNDO_STATE_FILENAME), 'utf8'),
+    )
+    if (typeof parsed === 'object' && parsed !== null
+      && Array.isArray((parsed as Record<string, unknown>).redo)
+      && (parsed as { redo: unknown[] }).redo.every(id => typeof id === 'string')) {
+      return { redo: (parsed as { redo: string[] }).redo }
+    }
+  } catch {
+    // Fall through to the empty stack.
+  }
+  return { redo: [] }
+}
+
+/** Write the redo stack so a concurrent reader never sees a partial file. */
+export async function writeUndoState(profileDir: string, state: UndoState): Promise<void> {
+  await writeFileAtomic(
+    join(resolveGenerationsDir(profileDir), UNDO_STATE_FILENAME),
+    JSON.stringify(state, undefined, 2) + '\n',
+    { mode: 0o600, dirMode: 0o700 },
+  )
+}
+
+/**
+ * Empty the redo stack, writing nothing when it is already empty (the common
+ * case — every boot records) so the history directory stays free of a
+ * redundant state file.
+ */
+async function clearRedoStack(profileDir: string): Promise<void> {
+  if (readUndoState(profileDir).redo.length === 0) return
+  await writeUndoState(profileDir, { redo: [] })
 }
 
 /** What {@link recordGeneration} needs to describe one observed configuration. */
@@ -246,6 +354,16 @@ export interface RecordGenerationOptions {
   render: string
   /** ISO timestamp for this observation. */
   now: string
+  /**
+   * How this observation came to be; defaults to `'boot'`. An adopted record
+   * keeps the origin it was created with — re-observing a manual snapshot's
+   * configuration at boot must not demote it to an auto-cleanable record.
+   */
+  origin?: GenerationOrigin
+  /** The note a `manual` snapshot carries; ignored on adoption. */
+  reason?: string
+  /** How many auto-cleanable generations to retain; defaults to {@link GENERATION_RETENTION}. */
+  retention?: number
 }
 
 /**
@@ -256,6 +374,13 @@ export interface RecordGenerationOptions {
  * boot it precedes resolves. Recording never fails a boot: an unwritable
  * history directory throws, so callers that must survive it catch — the record
  * is a recovery aid, not a boot precondition.
+ *
+ * A newly created record of any origin but `regret` empties the redo stack
+ * (here, in the store, so no caller can forget it): a genuinely new
+ * configuration invalidates every "step forward" future, while a `regret`
+ * record IS one of those futures — the undo's way back — and must not clear
+ * the stack it was just pushed onto. Adopting an existing record clears
+ * nothing: re-observing a configuration changes no future.
  * @param options - the composition to record.
  * @returns the stored generation once written, whether newly created or adopted.
  */
@@ -266,11 +391,15 @@ export function recordGeneration(options: RecordGenerationOptions): Promise<Conf
   const scope: GenerationScope = environment === null ? 'composition' : 'full'
   const existing = readGenerations(options.profileDir).generations
   const previous = existing.find(generation => generation.id === id)
+  const origin = previous?.origin ?? options.origin ?? 'boot'
+  const reason = previous?.reason ?? options.reason
   const composed: ComposedTree = { digest: digestText(options.render), render: options.render }
   const generation: ConfigGeneration = {
     formatVersion: GENERATION_FORMAT_VERSION,
     id,
     scope,
+    origin,
+    ...reason === undefined ? {} : { reason },
     // First sighting is identity; a hand-reverted configuration is the same
     // configuration and keeps the timestamp it was first seen with.
     recordedAt: previous?.recordedAt ?? options.now,
@@ -282,8 +411,11 @@ export function recordGeneration(options: RecordGenerationOptions): Promise<Conf
     composed,
     outcomes: previous?.outcomes ?? [],
   }
-  return writeGeneration(dir, generation).then(() => {
-    if (previous === undefined) prune(dir, [...existing, generation])
+  return writeGeneration(dir, generation).then(async () => {
+    if (previous === undefined) {
+      if (origin !== 'regret') await clearRedoStack(options.profileDir)
+      prune(dir, [...existing, generation], options.retention ?? GENERATION_RETENTION)
+    }
     return generation
   })
 }

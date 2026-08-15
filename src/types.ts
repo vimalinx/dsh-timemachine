@@ -64,6 +64,15 @@ export interface GenerationEnvironment {
  */
 export type GenerationScope = 'composition' | 'full'
 
+/**
+ * How a generation came to be recorded. `boot` is the launcher's observation of
+ * its own boot, `auto` the filesystem watcher's, `manual` an explicit snapshot,
+ * and `regret` the record an undo writes for the configuration it steps away
+ * from (so a redo can return to it). Records written before this field existed
+ * read as `boot` (see `generationOrigin` in `./generations.ts`).
+ */
+export type GenerationOrigin = 'boot' | 'auto' | 'manual' | 'regret'
+
 /** One boot attempt recorded against the generation it composed. */
 export interface GenerationOutcome {
   /** ISO timestamp of the attempt's settlement. */
@@ -97,6 +106,13 @@ export interface ConfigGeneration {
   id: string
   /** Which slots this record observed. */
   scope: GenerationScope
+  /**
+   * How this record came to be. Absent on records written before the field
+   * existed; readers default it to `'boot'` (see `generationOrigin`).
+   */
+  origin?: GenerationOrigin
+  /** The note a manual snapshot was taken with; absent on every other origin. */
+  reason?: string
   /** ISO timestamp this configuration was first observed. */
   recordedAt: string
   /** ISO timestamp this configuration was most recently composed. */
@@ -176,6 +192,12 @@ export interface ConfigGenerationHost {
   profile: string
   /** Absolute profile directory holding the records. */
   profileDir: string
+  /**
+   * The Harness home the profile lives under; the auto-save watcher needs it
+   * for the home patch layer. Absent on hosts that cannot supply one — the
+   * watcher then covers only the profile's own two files.
+   */
+  homeDir?: string
   /** The generation this process booted, or `undefined` when recording failed. */
   bootedId: string | undefined
   /** Read the three durable input texts as they now stand on disk. */
@@ -198,4 +220,78 @@ export interface RestoreResult {
   refusal?: string
   /** The comparison behind the decision; absent when composing the generation threw outright. */
   verdict?: RestoreVerdict
+}
+
+/**
+ * What an undo/redo step did. An empty stack is a normal answer, not an error:
+ * `changed` is false and `empty` names which direction had nothing left. A
+ * refused restore rides `result` like a direct restore's refusal does.
+ */
+export interface StackRestoreResult {
+  /** Whether a generation's inputs were actually written back. */
+  changed: boolean
+  /** Which stack was empty when nothing changed. */
+  empty?: 'nothing-to-undo' | 'nothing-to-redo'
+  /** The underlying restore, when a target generation existed to step to. */
+  result?: RestoreResult
+}
+
+/** The history's undo/redo availability and boot health, for one status poll. */
+export interface TimemachineStatus {
+  /** Whether {@link planUndo} finds a configuration to step back to. */
+  canUndo: boolean
+  /** Whether the redo stack holds a configuration to step forward to. */
+  canRedo: boolean
+  /** How many readable generations the profile holds. */
+  total: number
+  /** Whether the most recently settled boot attempt failed. */
+  lastBootFailed: boolean
+}
+
+/** The plugin's own settings, stored at `<profile>/timemachine/settings.json`. */
+export interface TimemachineSettings {
+  /** Whether the filesystem watcher records changes on its own. */
+  autoSave: boolean
+  /** How long input-file edits settle before an auto record, in milliseconds. */
+  debounceMs: number
+  /** How many auto-cleanable (`boot`/`auto`) generations one profile retains. */
+  retention: number
+  /** Panel keybindings, as display strings (`Ctrl+Alt+Z` style). */
+  shortcuts: {
+    undo: string
+    redo: string
+  }
+}
+
+/** A partial settings update; every field optional, `shortcuts` merged per key. */
+export interface TimemachineSettingsPatch {
+  autoSave?: boolean | undefined
+  debounceMs?: number | undefined
+  retention?: number | undefined
+  shortcuts?: {
+    undo?: string | undefined
+    redo?: string | undefined
+  } | undefined
+}
+
+/**
+ * Session events the agent tools append (one per tool call). Log-only: no
+ * projection folds them, so they ride the session log as an audit trail of
+ * who moved the configuration and when. Declared here, the record types' one
+ * home; `@deepseek-ai/dsh-session` is a dev-only dependency because this
+ * augmentation is erased at compile time.
+ */
+declare module '@deepseek-ai/dsh-session/types' {
+  interface SessionEventMap {
+    /** `timemachine_snapshot` saved a manual snapshot. */
+    'timemachine/snapshot': { id: string, reason?: string }
+    /** `timemachine_undo` stepped back (or found nothing to undo). */
+    'timemachine/undo': { changed: boolean, id?: string }
+    /** `timemachine_redo` stepped forward (or found nothing to redo). */
+    'timemachine/redo': { changed: boolean, id?: string }
+    /** `timemachine_restore` wrote a recorded configuration back. */
+    'timemachine/restore': { id: string, restored: boolean }
+    /** `timemachine_list` answered a history listing. */
+    'timemachine/list': { total: number }
+  }
 }

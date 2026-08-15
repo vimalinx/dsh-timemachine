@@ -16,11 +16,14 @@ import {
   GENERATION_FORMAT_VERSION,
   GENERATION_RETENTION,
   generationId,
+  generationOrigin,
   lastActivated,
   latestStatus,
   readGenerations,
+  readUndoState,
   recordGeneration,
   resolveGenerationsDir,
+  writeUndoState,
   type BundleStamp,
   type GenerationEnvironment,
   type GenerationInputs,
@@ -292,6 +295,114 @@ describe('retention', () => {
     const kept = readGenerations(profileDir).generations
     expect(kept.map(generation => generation.id)).toContain(oldest.id)
     expect(lastActivated(kept)?.id).toBe(oldest.id)
+  })
+})
+
+describe('origins', () => {
+  it('stamps a new record with the given origin and reason', async () => {
+    const manual = await record({ origin: 'manual', reason: 'before the experiment' })
+    expect(manual.origin).toBe('manual')
+    expect(manual.reason).toBe('before the experiment')
+    expect(readGenerations(profileDir).generations[0]).toEqual(manual)
+  })
+
+  it('defaults a new record to the boot origin', async () => {
+    expect((await record()).origin).toBe('boot')
+  })
+
+  it('reads a pre-origin record as a boot observation', async () => {
+    const written = await record()
+    const dir = resolveGenerationsDir(profileDir)
+    const { origin: _origin, ...preOrigin } = written
+    writeFileSync(join(dir, `${written.id}.json`), JSON.stringify(preOrigin))
+    const [read] = readGenerations(profileDir).generations
+    expect(read!.origin).toBeUndefined()
+    expect(generationOrigin(read!)).toBe('boot')
+  })
+
+  it('rejects a hand-edited record with an unknown origin', async () => {
+    const written = await record()
+    writeFileSync(
+      join(resolveGenerationsDir(profileDir), `${written.id}.json`),
+      JSON.stringify({ ...written, origin: 'conjured' }),
+    )
+    expect(readGenerations(profileDir).unreadable[0]?.reason).toContain('`origin`')
+  })
+
+  it('keeps the creating origin when the configuration is re-observed', async () => {
+    const manual = await record({ origin: 'manual' })
+    // A later boot of the same inputs adopts the record; it must not demote
+    // the snapshot to an auto-cleanable boot observation.
+    const adopted = await record({ now: '2026-08-15T00:00:00.000Z' })
+    expect(adopted.id).toBe(manual.id)
+    expect(generationOrigin(adopted)).toBe('manual')
+  })
+})
+
+describe('the redo stack and recording', () => {
+  it('clears the redo stack when a genuinely new configuration is recorded', async () => {
+    await record()
+    await writeUndoState(profileDir, { redo: ['aaaa00000000'] })
+    await record({ inputs: inputs({ profilePatch: '- id: changed\n' }), now: '2026-08-15T00:00:00.000Z' })
+    expect(readUndoState(profileDir)).toEqual({ redo: [] })
+  })
+
+  it('keeps the redo stack when the new record is a regret (the undo way-back)', async () => {
+    await record()
+    await writeUndoState(profileDir, { redo: ['aaaa00000000'] })
+    await record({
+      inputs: inputs({ profilePatch: '- id: changed\n' }),
+      now: '2026-08-15T00:00:00.000Z',
+      origin: 'regret',
+    })
+    expect(readUndoState(profileDir)).toEqual({ redo: ['aaaa00000000'] })
+  })
+
+  it('keeps the redo stack when an existing configuration is merely adopted', async () => {
+    await record()
+    await writeUndoState(profileDir, { redo: ['aaaa00000000'] })
+    await record({ now: '2026-08-15T00:00:00.000Z' })
+    expect(readUndoState(profileDir)).toEqual({ redo: ['aaaa00000000'] })
+  })
+})
+
+describe('retention layering', () => {
+  /** Record `count` distinct configurations, oldest first. */
+  const fill = async (count: number): Promise<string[]> => {
+    const ids: string[] = []
+    for (let index = 0; index < count; index++) {
+      ids.push((await record({
+        inputs: inputs({ profilePatch: `- id: row-${index}\n` }),
+        now: `2026-08-14T00:${String(index).padStart(2, '0')}:00.000Z`,
+      })).id)
+    }
+    return ids
+  }
+
+  it('keeps manual and regret records however far past the bound they are', async () => {
+    const manual = await record({ origin: 'manual', now: '2026-08-01T00:00:00.000Z' })
+    const regret = await record({
+      inputs: inputs({ profilePatch: '- id: regret\n' }),
+      origin: 'regret',
+      now: '2026-08-01T01:00:00.000Z',
+    })
+    await fill(GENERATION_RETENTION + 5)
+    const kept = readGenerations(profileDir).generations.map(generation => generation.id)
+    expect(kept).toContain(manual.id)
+    expect(kept).toContain(regret.id)
+    // Only the boot records count against the bound: 50 of them remain.
+    expect(kept).toHaveLength(GENERATION_RETENTION + 2)
+  })
+
+  it('honors a caller-supplied retention over the default', async () => {
+    for (let index = 0; index < 5; index++) {
+      await record({
+        inputs: inputs({ profilePatch: `- id: row-${index}\n` }),
+        now: `2026-08-14T00:${String(index).padStart(2, '0')}:00.000Z`,
+        retention: 3,
+      })
+    }
+    expect(readGenerations(profileDir).generations).toHaveLength(3)
   })
 })
 

@@ -7,13 +7,26 @@
 import { describe, expect, it } from 'vitest'
 import type { GenerationSummary } from '../src/rpc.ts'
 import type { ConfigGeneration } from '../src/types.ts'
-import { createTimeMachineStore } from '../src/client/store.ts'
-import { formatTimestamp, restoreTargets, shortGenerationId, summaryStatusKey } from '../src/client/views.ts'
+import { createHeaderActionsStore, createTimeMachineStore } from '../src/client/store.ts'
+import {
+  DEFAULT_SHORTCUTS,
+  diffFileKey,
+  formatTimestamp,
+  isCollapsedMarker,
+  isEditableTarget,
+  normalizeShortcut,
+  originKey,
+  restoreTargets,
+  shortGenerationId,
+  shortcutFromEvent,
+  summaryStatusKey,
+} from '../src/client/views.ts'
 
 function summary(overrides: Partial<GenerationSummary> = {}): GenerationSummary {
   return {
     id: 'abcdef0123456789',
     scope: 'full',
+    origin: 'boot',
     recordedAt: '2026-08-01T08:00:00',
     lastSeenAt: '2026-08-02T09:30:00',
     bundleCount: 2,
@@ -167,6 +180,13 @@ describe('createTimeMachineStore', () => {
     store.actions.select('aaa')
     store.actions.detailLoaded(generation())
     store.actions.confirmRestore('aaa')
+    store.actions.statusLoaded({ canUndo: true, canRedo: false, total: 1, lastBootFailed: true })
+    store.actions.diffLoaded([])
+    store.actions.confirmRemove('aaa')
+    store.actions.snapshotDone('abc')
+    store.actions.settingsLoaded({ autoSave: true, debounceMs: 1500, retention: 50, shortcuts: { undo: 'Ctrl+Alt+Z', redo: 'Ctrl+Alt+Y' } })
+    store.actions.archiveWorking('export')
+    store.actions.pruneDone(['aaa'])
     store.actions.reset()
     expect(store.getSnapshot()).toEqual({
       list: 'idle',
@@ -177,7 +197,126 @@ describe('createTimeMachineStore', () => {
       detail: { status: 'idle' },
       confirmId: undefined,
       restore: { status: 'idle' },
+      status: undefined,
+      diff: { status: 'idle' },
+      confirmRemoveId: undefined,
+      remove: { status: 'idle' },
+      snapshot: { status: 'idle' },
+      settings: { status: 'idle' },
+      archive: { status: 'idle' },
+      prune: { status: 'idle' },
     })
+  })
+
+  it('statusLoaded publishes the poll', () => {
+    const store = createTimeMachineStore().create()
+    store.actions.statusLoaded({ canUndo: false, canRedo: true, total: 4, lastBootFailed: true })
+    expect(store.getSnapshot().status).toEqual({ canUndo: false, canRedo: true, total: 4, lastBootFailed: true })
+  })
+
+  it('the diff machine: begin → loaded/failed, close returns to idle', () => {
+    const store = createTimeMachineStore().create()
+    store.actions.diffBegin()
+    expect(store.getSnapshot().diff).toEqual({ status: 'loading' })
+    const diffs = [{ file: 'manifest' as const, hunks: [{ type: 'add' as const, text: '+x' }] }]
+    store.actions.diffLoaded(diffs)
+    expect(store.getSnapshot().diff).toEqual({ status: 'loaded', diffs })
+    store.actions.closeDiff()
+    expect(store.getSnapshot().diff).toEqual({ status: 'idle' })
+    store.actions.diffBegin()
+    store.actions.diffFailed('boom')
+    expect(store.getSnapshot().diff).toEqual({ status: 'failed', message: 'boom' })
+  })
+
+  it('the remove machine: confirm → working → done clears the confirmation', () => {
+    const store = createTimeMachineStore().create()
+    store.actions.confirmRemove('aaa')
+    expect(store.getSnapshot().confirmRemoveId).toBe('aaa')
+    store.actions.cancelRemove()
+    expect(store.getSnapshot().confirmRemoveId).toBeUndefined()
+    store.actions.confirmRemove('aaa')
+    store.actions.removeWorking('aaa')
+    store.actions.removeDone('aaa', { removed: false, refusal: 'last good' })
+    const state = store.getSnapshot()
+    expect(state.confirmRemoveId).toBeUndefined()
+    expect(state.remove).toEqual({ status: 'done', id: 'aaa', result: { removed: false, refusal: 'last good' } })
+    store.actions.dismissRemove()
+    expect(store.getSnapshot().remove).toEqual({ status: 'idle' })
+  })
+
+  it('a successful remove of the selected row closes its detail; a refusal keeps it', () => {
+    const store = createTimeMachineStore().create()
+    store.actions.select('aaa')
+    store.actions.detailLoaded(generation())
+    store.actions.removeDone('aaa', { removed: true })
+    expect(store.getSnapshot().selectedId).toBeUndefined()
+    expect(store.getSnapshot().detail).toEqual({ status: 'idle' })
+
+    store.actions.select('bbb')
+    store.actions.detailLoaded(generation({ id: 'bbb' }))
+    store.actions.removeDone('bbb', { removed: false, refusal: 'booted' })
+    expect(store.getSnapshot().selectedId).toBe('bbb')
+  })
+
+  it('the snapshot machine: working → done/failed, dismiss returns to idle', () => {
+    const store = createTimeMachineStore().create()
+    store.actions.snapshotWorking()
+    expect(store.getSnapshot().snapshot).toEqual({ status: 'working' })
+    store.actions.snapshotDone('abc')
+    expect(store.getSnapshot().snapshot).toEqual({ status: 'done', id: 'abc' })
+    store.actions.dismissSnapshot()
+    store.actions.snapshotFailed('boom')
+    expect(store.getSnapshot().snapshot).toEqual({ status: 'failed', message: 'boom' })
+  })
+
+  it('the settings machine: load, save keeps the form, save failure keeps the settings', () => {
+    const store = createTimeMachineStore().create()
+    const settings = { autoSave: true, debounceMs: 1500, retention: 50, shortcuts: { undo: 'Ctrl+Alt+Z', redo: 'Ctrl+Alt+Y' } }
+    store.actions.settingsBegin()
+    expect(store.getSnapshot().settings).toEqual({ status: 'loading' })
+    store.actions.settingsLoaded(settings)
+    expect(store.getSnapshot().settings).toEqual({ status: 'loaded', settings, saving: false })
+    // A re-read over a loaded form does not bounce it back to loading.
+    store.actions.settingsBegin()
+    expect(store.getSnapshot().settings.status).toBe('loaded')
+    store.actions.settingsSaving()
+    expect(store.getSnapshot().settings).toMatchObject({ saving: true })
+    store.actions.settingsSaveFailed('bad-request: bad patch')
+    expect(store.getSnapshot().settings).toEqual({ status: 'loaded', settings, saving: false, error: 'bad-request: bad patch' })
+    store.actions.settingsFailed('gone')
+    expect(store.getSnapshot().settings).toEqual({ status: 'failed', message: 'gone' })
+  })
+
+  it('the archive machine: working → done/failed per direction, dismiss returns to idle', () => {
+    const store = createTimeMachineStore().create()
+    store.actions.archiveWorking('export')
+    expect(store.getSnapshot().archive).toEqual({ status: 'working', direction: 'export' })
+    store.actions.archiveDone('export')
+    expect(store.getSnapshot().archive).toEqual({ status: 'done', direction: 'export', imported: undefined, skipped: undefined })
+    store.actions.dismissArchive()
+    expect(store.getSnapshot().archive).toEqual({ status: 'idle' })
+    store.actions.archiveDone('import', 2, 3)
+    expect(store.getSnapshot().archive).toEqual({ status: 'done', direction: 'import', imported: 2, skipped: 3 })
+    store.actions.archiveFailed('import', 'bad archive')
+    expect(store.getSnapshot().archive).toEqual({ status: 'failed', direction: 'import', message: 'bad archive' })
+  })
+
+  it('the prune machine: working → done closes a pruned row\'s detail, dismiss returns to idle', () => {
+    const store = createTimeMachineStore().create()
+    store.actions.select('aaa')
+    store.actions.detailLoaded(generation({ id: 'aaa' }))
+    store.actions.pruneWorking()
+    expect(store.getSnapshot().prune).toEqual({ status: 'working' })
+    store.actions.pruneDone(['aaa', 'bbb'])
+    const state = store.getSnapshot()
+    expect(state.prune).toEqual({ status: 'done', removed: ['aaa', 'bbb'] })
+    // A pruned row's record is gone with it; the strip stays at roster level.
+    expect(state.selectedId).toBeUndefined()
+    expect(state.detail).toEqual({ status: 'idle' })
+    store.actions.dismissPrune()
+    expect(store.getSnapshot().prune).toEqual({ status: 'idle' })
+    store.actions.pruneFailed('boom')
+    expect(store.getSnapshot().prune).toEqual({ status: 'failed', message: 'boom' })
   })
 })
 
@@ -211,5 +350,102 @@ describe('view mappings', () => {
       inputs: { manifest: '{}', profilePatch: null, homePatch: null },
       environment: null,
     }))).toEqual(['package.json'])
+  })
+
+  it('originKey maps every origin to its badge label', () => {
+    expect(originKey('boot')).toBe('origin.boot')
+    expect(originKey('auto')).toBe('origin.auto')
+    expect(originKey('manual')).toBe('origin.manual')
+    expect(originKey('regret')).toBe('origin.regret')
+  })
+
+  it('diffFileKey maps every compared file to its heading', () => {
+    expect(diffFileKey('manifest')).toBe('diff.file.manifest')
+    expect(diffFileKey('profilePatch')).toBe('diff.file.profilePatch')
+    expect(diffFileKey('homePatch')).toBe('diff.file.homePatch')
+    expect(diffFileKey('render')).toBe('diff.file.render')
+  })
+
+  it('isCollapsedMarker recognizes only the host diff marker', () => {
+    expect(isCollapsedMarker('… (4 unchanged lines)')).toBe(true)
+    expect(isCollapsedMarker('… (1 unchanged lines)')).toBe(true)
+    expect(isCollapsedMarker('ordinary context')).toBe(false)
+    expect(isCollapsedMarker('… (x unchanged lines)')).toBe(false)
+  })
+
+  it('normalizeShortcut canonicalizes modifier order, aliases, and case', () => {
+    expect(normalizeShortcut('alt+ctrl+z')).toBe('Ctrl+Alt+Z')
+    expect(normalizeShortcut('Ctrl+Alt+Z')).toBe('Ctrl+Alt+Z')
+    expect(normalizeShortcut('control+shift+f9')).toBe('Ctrl+Shift+F9')
+    expect(normalizeShortcut('Cmd+P')).toBe('Meta+P')
+    expect(normalizeShortcut(DEFAULT_SHORTCUTS.undo)).toBe('Ctrl+Alt+Z')
+    expect(normalizeShortcut(DEFAULT_SHORTCUTS.redo)).toBe('Ctrl+Alt+Y')
+  })
+
+  it('shortcutFromEvent reduces an event to the canonical combination', () => {
+    const event = (init: Record<string, unknown>) => init as unknown as KeyboardEvent
+    expect(shortcutFromEvent(event({ key: 'z', ctrlKey: true, altKey: true }))).toBe('Ctrl+Alt+Z')
+    expect(shortcutFromEvent(event({ key: 'Y', ctrlKey: true, altKey: true }))).toBe('Ctrl+Alt+Y')
+    // A pure modifier press normalizes to the modifiers alone.
+    expect(shortcutFromEvent(event({ key: 'Control', ctrlKey: true, altKey: true }))).toBe('Ctrl+Alt')
+    expect(shortcutFromEvent(event({ key: 'F9', metaKey: true }))).toBe('Meta+F9')
+  })
+
+  it('isEditableTarget guards inputs, textareas, selects, and contentEditable', () => {
+    const target = (shape: Record<string, unknown>) => shape as unknown as EventTarget
+    expect(isEditableTarget(null)).toBe(false)
+    expect(isEditableTarget(target({ tagName: 'INPUT' }))).toBe(true)
+    expect(isEditableTarget(target({ tagName: 'TEXTAREA' }))).toBe(true)
+    expect(isEditableTarget(target({ tagName: 'SELECT' }))).toBe(true)
+    expect(isEditableTarget(target({ tagName: 'DIV', isContentEditable: true }))).toBe(true)
+    expect(isEditableTarget(target({ tagName: 'DIV', isContentEditable: false }))).toBe(false)
+    // A non-element target (window, a plain event source) is not editable.
+    expect(isEditableTarget(target({}))).toBe(false)
+  })
+})
+
+describe('createHeaderActionsStore', () => {
+  it('runs the stack confirmation machine', () => {
+    const store = createHeaderActionsStore().create()
+    store.actions.statusLoaded({ canUndo: true, canRedo: false, total: 1, lastBootFailed: false })
+    expect(store.getSnapshot().status?.canUndo).toBe(true)
+    store.actions.confirmStack('undo')
+    expect(store.getSnapshot().confirm).toBe('undo')
+    store.actions.cancelStack()
+    expect(store.getSnapshot().confirm).toBeUndefined()
+    store.actions.confirmStack('redo')
+    store.actions.stackWorking('redo')
+    store.actions.stackDone('redo', { changed: false, empty: 'nothing-to-redo' })
+    expect(store.getSnapshot().confirm).toBeUndefined()
+    expect(store.getSnapshot().stack).toEqual({ status: 'done', direction: 'redo', result: { changed: false, empty: 'nothing-to-redo' } })
+    store.actions.dismissStack()
+    expect(store.getSnapshot().stack).toEqual({ status: 'idle' })
+    store.actions.stackFailed('undo', 'boom')
+    expect(store.getSnapshot().stack).toEqual({ status: 'failed', direction: 'undo', message: 'boom' })
+  })
+
+  it('runs the snapshot popover machine and reset restores the initial snapshot', () => {
+    const store = createHeaderActionsStore().create()
+    store.actions.openSnapshot()
+    expect(store.getSnapshot().snapshotOpen).toBe(true)
+    store.actions.closeSnapshot()
+    expect(store.getSnapshot().snapshotOpen).toBe(false)
+    store.actions.openSnapshot()
+    store.actions.snapshotWorking()
+    store.actions.snapshotDone('abc')
+    expect(store.getSnapshot().snapshotOpen).toBe(false)
+    expect(store.getSnapshot().snapshot).toEqual({ status: 'done', id: 'abc' })
+    store.actions.snapshotFailed('boom')
+    expect(store.getSnapshot().snapshot).toEqual({ status: 'failed', message: 'boom' })
+    store.actions.dismissSnapshot()
+    expect(store.getSnapshot().snapshot).toEqual({ status: 'idle' })
+    store.actions.reset()
+    expect(store.getSnapshot()).toEqual({
+      status: undefined,
+      confirm: undefined,
+      stack: { status: 'idle' },
+      snapshotOpen: false,
+      snapshot: { status: 'idle' },
+    })
   })
 })

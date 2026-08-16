@@ -140,7 +140,7 @@ function bench(faceOverrides: Partial<TimeMachinePanelFace> = {}, wide = true) {
 
 /** Open the panel. */
 function openPanel() {
-  fireEvent.click(screen.getByRole('button', { name: '配置代' }))
+  fireEvent.click(screen.getByRole('button', { name: '时间机器' }))
 }
 
 describe('TimeMachinePanel', () => {
@@ -151,13 +151,13 @@ describe('TimeMachinePanel', () => {
     openPanel()
     expect(face.onRefresh).toHaveBeenCalledTimes(2)
     expect(screen.getByText('读取中…')).toBeTruthy()
-    fireEvent.click(screen.getByRole('button', { name: '配置代' }))
+    fireEvent.click(screen.getByRole('button', { name: '时间机器' }))
     expect(screen.queryByText('读取中…')).toBeNull()
   })
 
   it('renders the rail trigger without the label when the sidebar is folded', () => {
     bench({}, false)
-    const trigger = screen.getByRole('button', { name: '配置代' })
+    const trigger = screen.getByRole('button', { name: '时间机器' })
     expect(trigger.textContent).toBe('')
   })
 

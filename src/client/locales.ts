@@ -5,8 +5,8 @@ export const NS = 'timemachine'
 
 /** Simplified Chinese dictionary (the key-set source of truth). */
 export const zh = {
-  'trigger.aria': '配置代',
-  'panel.title': '配置代',
+  'trigger.aria': '时间机器',
+  'panel.title': '时间机器',
   'panel.loading': '读取中…',
   'panel.absent': '此实例未记录配置历史',
   'panel.empty': '尚无记录，启动一次后生成',
@@ -127,8 +127,8 @@ declare module '@deepseek-ai/dsh-client-ui-slots' {
 
 /** English dictionary, checked complete against the zh key set. */
 export const en = {
-  'trigger.aria': 'Config generations',
-  'panel.title': 'Config generations',
+  'trigger.aria': 'Time Machine',
+  'panel.title': 'Time Machine',
   'panel.loading': 'Reading…',
   'panel.absent': 'This instance has no recorded configuration history',
   'panel.empty': 'Nothing recorded yet; boot once to produce a record',

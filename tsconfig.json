@@ -21,8 +21,8 @@
     "noUnusedParameters": true,
     "types": ["node"],
     "paths": {
-      "dsh-timemachine": ["./src/index.ts"],
-      "dsh-timemachine/invariant": ["./src/invariant.ts"]
+      "@vimalinx/dsh-timemachine": ["./src/index.ts"],
+      "@vimalinx/dsh-timemachine/invariant": ["./src/invariant.ts"]
     }
   },
   "include": [

@@ -2,4 +2,4 @@
 # mount the configuration-history plugin (service + loopback RPC channel).
 - insert:
     - id: timemachine
-      name: dsh-timemachine
+      name: '@vimalinx/dsh-timemachine'

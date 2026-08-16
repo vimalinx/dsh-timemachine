@@ -18,7 +18,7 @@ import type { UserConfig } from 'tsdown'
 import { transform } from 'lightningcss'
 
 /** Plugin id stamped into the `__ModuleLoader__.load` handoff and the injected style tags. */
-const ID = 'dsh-timemachine'
+const ID = '@vimalinx/dsh-timemachine'
 
 /**
  * Virtual-id wrapper keeping module CSS away from tsdown's own css pipeline

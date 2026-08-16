@@ -11,7 +11,7 @@ This package is a standard external dsh plugin: it installs with `dsh plugin add
 Once the package is published to npm:
 
 ```sh
-dsh plugin --profile web add dsh-timemachine
+dsh plugin --profile web add @vimalinx/dsh-timemachine
 ```
 
 Before publication, install from a tarball or a git URL — the same command accepts both:

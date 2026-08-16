@@ -1,5 +1,5 @@
 {
-  "name": "dsh-timemachine",
+  "name": "@vimalinx/dsh-timemachine",
   "description": "Version control for a DeepSeek Harness profile's plugin-tree configuration",
   "version": "0.2.0",
   "repository": {
@@ -7,6 +7,9 @@
     "url": "git+https://github.com/vimalinx/dsh-timemachine.git"
   },
   "type": "module",
+  "publishConfig": {
+    "access": "public"
+  },
   "main": "lib/index.js",
   "types": "lib/types/index.d.ts",
   "bin": {

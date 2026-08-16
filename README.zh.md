@@ -11,7 +11,7 @@
 包发布到 npm 之后：
 
 ```sh
-dsh plugin --profile web add dsh-timemachine
+dsh plugin --profile web add @vimalinx/dsh-timemachine
 ```
 
 发布之前，可以从 tarball 或 git URL 安装——同一条命令两种形式都接受：

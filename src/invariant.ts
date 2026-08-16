@@ -7,7 +7,7 @@
 import type { Context } from '@deepseek-ai/cordis'
 import type { InvariantInstaller } from '@deepseek-ai/dsh-invariants'
 
-const PACKAGE_NAME = 'dsh-timemachine'
+const PACKAGE_NAME = '@vimalinx/dsh-timemachine'
 
 /** Cordis companion plugin name. */
 export const name = 'timemachine-invariant'
